@@ -16,8 +16,8 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Alex Qiu and Matt Strong',
-    maintainer_email='aqiu34@stanford.edu, mastro1@stanford.edu',
+    maintainer='Alex Qiu',
+    maintainer_email='aqiu34@stanford.edu',
     description='MuJoCo simulation bridge for TidyBot2',
     license='MIT',
     entry_points={
