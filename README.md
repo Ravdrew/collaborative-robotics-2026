@@ -11,7 +11,7 @@ There are two ways to get started:
 Use our pre-built Docker image with VNC desktop access. Works on any OS (Windows, macOS, Linux).
 
 ```bash
-# 1. Clone the repo
+# 1. Clone the repo (if you are in windows, we highly, highly recommend WSL Bash)
 git clone https://github.com/armlabstanford/collaborative-robotics-2026.git
 cd collaborative-robotics-2026
 
