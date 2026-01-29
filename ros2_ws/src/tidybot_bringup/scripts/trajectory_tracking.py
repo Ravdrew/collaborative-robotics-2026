@@ -126,7 +126,12 @@ class TrajectoryTracker(Node):
         - Position: msg.pose.pose.position.x, msg.pose.pose.position.y
         - Orientation: msg.pose.pose.orientation (quaternion: x, y, z, w)
 
-        Convert quaternion to yaw angle using: yaw = 2 * atan2(qz, qw)
+        Convert quaternion to yaw angle using: odom_theta = 2 * atan2(qz, qw)
+
+        IMPORTANT: The MuJoCo simulation has a coordinate offset. The odometry
+        theta is π/2 ahead of the actual robot heading used for velocity control.
+        When odom reports theta=π/2, the robot is actually facing +X (heading=0).
+        So you need: actual_heading = odom_theta - π/2
 
         Update: self.current_x, self.current_y, self.current_theta
         Set self.odom_received = True after first message

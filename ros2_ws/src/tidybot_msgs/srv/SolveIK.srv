@@ -7,7 +7,7 @@ string arm_name
 # Target end-effector pose in base_link frame
 geometry_msgs/Pose target_pose
 
-# Optional: Initial joint positions as seed for solver (5 values)
+# Optional: Initial joint positions as seed for solver (6 values)
 # If empty, uses current joint positions
 float64[] seed_joint_positions
 
@@ -23,8 +23,8 @@ float64 timeout
 # Whether a valid IK solution was found
 bool success
 
-# Joint positions solution (5 values)
-# Order: waist, shoulder, elbow, wrist_angle, wrist_rotate
+# Joint positions solution (6 values)
+# Order: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate
 float64[] joint_positions
 
 # Residual position error in meters

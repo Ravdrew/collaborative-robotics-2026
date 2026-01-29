@@ -46,12 +46,12 @@ class MuJoCoBridgeNode(Node):
         # 'joint_x', 'joint_y', 'joint_th',
         # Pan-tilt (2 DOF)
         'camera_pan', 'camera_tilt',
-        # Right arm (5 DOF)
-        'right_waist', 'right_shoulder', 'right_elbow', 'right_wrist_angle', 'right_wrist_rotate',
+        # Right arm (6 DOF)
+        'right_waist', 'right_shoulder', 'right_elbow', 'right_forearm_roll', 'right_wrist_angle', 'right_wrist_rotate',
         # Right gripper (2 DOF)
         'right_left_finger', 'right_right_finger',
-        # Left arm (5 DOF)
-        'left_waist', 'left_shoulder', 'left_elbow', 'left_wrist_angle', 'left_wrist_rotate',
+        # Left arm (6 DOF)
+        'left_waist', 'left_shoulder', 'left_elbow', 'left_forearm_roll', 'left_wrist_angle', 'left_wrist_rotate',
         # Left gripper (2 DOF)
         'left_left_finger', 'left_right_finger',
     ]
@@ -60,9 +60,9 @@ class MuJoCoBridgeNode(Node):
     ACTUATOR_NAMES = [
         'joint_x', 'joint_y', 'joint_th',
         'camera_pan', 'camera_tilt',
-        'right_waist', 'right_shoulder', 'right_elbow', 'right_wrist_angle', 'right_wrist_rotate',
+        'right_waist', 'right_shoulder', 'right_elbow', 'right_forearm_roll', 'right_wrist_angle', 'right_wrist_rotate',
         'right_left_finger', 'right_right_finger',
-        'left_waist', 'left_shoulder', 'left_elbow', 'left_wrist_angle', 'left_wrist_rotate',
+        'left_waist', 'left_shoulder', 'left_elbow', 'left_forearm_roll', 'left_wrist_angle', 'left_wrist_rotate',
         'left_left_finger', 'left_right_finger',
     ]
 
@@ -115,6 +115,15 @@ class MuJoCoBridgeNode(Node):
         try:
             self.model = mujoco.MjModel.from_xml_path(model_path)
             self.data = mujoco.MjData(self.model)
+
+            # Load home keyframe if available for stable initial state
+            try:
+                home_key_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, 'home')
+                mujoco.mj_resetDataKeyframe(self.model, self.data, home_key_id)
+                self.get_logger().info('Loaded home keyframe for stable initial state')
+            except Exception:
+                self.get_logger().warn('No home keyframe found, using default state')
+
         except Exception as e:
             self.get_logger().error(f'Failed to load MuJoCo model: {e}')
             raise
@@ -122,22 +131,29 @@ class MuJoCoBridgeNode(Node):
         # Build actuator ID lookup
         self.actuator_ids = {}
         for name in self.ACTUATOR_NAMES:
-            try:
-                self.actuator_ids[name] = mujoco.mj_name2id(
-                    self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name
-                )
-            except Exception:
+            actuator_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
+            if actuator_id >= 0:
+                self.actuator_ids[name] = actuator_id
+            else:
                 self.get_logger().warn(f'Actuator not found: {name}')
 
         # Build joint ID lookup
         self.joint_ids = {}
+        # Add base joints (not published but needed for TF)
+        for name in ['joint_x', 'joint_y', 'joint_th']:
+            joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if joint_id >= 0:
+                self.joint_ids[name] = joint_id
+            else:
+                self.get_logger().warn(f'Base joint not found: {name}')
+        # Add arm/gripper joints (published in joint_states)
         for name in self.JOINT_NAMES:
-            try:
-                self.joint_ids[name] = mujoco.mj_name2id(
-                    self.model, mujoco.mjtObj.mjOBJ_JOINT, name
-                )
-            except Exception:
-                self.get_logger().warn(f'Joint not found: {name}')
+            joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if joint_id >= 0:
+                self.joint_ids[name] = joint_id
+                self.get_logger().info(f'Found joint: {name} (id={joint_id})')
+            else:
+                self.get_logger().error(f'Joint NOT found: {name}')
 
         # Image bridge
         if HAS_CV_BRIDGE:
@@ -152,7 +168,7 @@ class MuJoCoBridgeNode(Node):
         self.sim_step_count = 0
         self.base_x = 0.0
         self.base_y = 0.0
-        self.base_th = 0.0
+        self.base_th = np.pi / 2  # Robot model faces -Y, rotate 90° to face +X
         self.cmd_vel = Twist()
         self.current_vel = Twist()  # Smoothed velocity
         self.last_sim_time = None
@@ -160,7 +176,7 @@ class MuJoCoBridgeNode(Node):
 
         # Joint position filtering to reduce RViz jitter
         self.filtered_joint_positions = {}
-        self.joint_filter_alpha = 0.3  # Lower = more smoothing (0.1-0.5 typical)
+        self.joint_filter_alpha = 1.0  # 1.0 = no filtering, lower = more smoothing
 
         # Acceleration limits for smooth motion (m/s^2 and rad/s^2)
         self.max_linear_accel = 2.0   # m/s^2 (higher = snappier response)
@@ -180,11 +196,18 @@ class MuJoCoBridgeNode(Node):
         self.kp_linear = 2.0   # Proportional gain for linear motion
         self.kp_angular = 3.0  # Proportional gain for angular motion
 
-        # Target positions for all actuators (initialized to current)
-        self.target_ctrl = np.zeros(self.model.nu)
+        # Target positions for all actuators (initialized from data.ctrl which may have keyframe values)
+        self.target_ctrl = self.data.ctrl.copy()
 
-        # QoS profile
-        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)
+        # Ensure gripper positions are valid (minimum -0.014)
+        for name in ['right_left_finger', 'right_right_finger', 'left_left_finger', 'left_right_finger']:
+            if name in self.actuator_ids:
+                idx = self.actuator_ids[name]
+                if self.target_ctrl[idx] < -0.014:
+                    self.target_ctrl[idx] = -0.014
+
+        # QoS profile - use RELIABLE for RViz compatibility
+        qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
 
         # Publishers
         self.joint_state_pub = self.create_publisher(JointState, '/joint_states', 10)
@@ -264,38 +287,38 @@ class MuJoCoBridgeNode(Node):
         """Handle position target for the mobile base (go-to-goal)."""
         with self.lock:
             self.position_control_mode = True
-            # Target coordinates are in robot-forward-aligned frame where:
-            # - x is forward (direction camera/arms face)
-            # - y is left
-            # Robot faces -Y at theta=0, so we rotate by -π/2:
-            # x_world = y_input, y_world = -x_input
+            # Target coordinates are in user frame where:
+            # - x is forward (+X world, direction camera/arms face)
+            # - y is left (+Y world)
+            # Robot faces +X at home (MuJoCo theta=π/2), so user frame = world frame for position.
+            # For theta: user theta=0 means facing +X = MuJoCo theta π/2
             self.target_pose = Pose2D()
-            self.target_pose.x = msg.y
-            self.target_pose.y = -msg.x
-            self.target_pose.theta = msg.theta
+            self.target_pose.x = msg.x
+            self.target_pose.y = msg.y
+            self.target_pose.theta = msg.theta + np.pi / 2
             self.get_logger().info(
-                f'Target: forward={msg.x:.2f}m -> world ({self.target_pose.x:.2f}, {self.target_pose.y:.2f})'
+                f'Target: user ({msg.x:.2f}, {msg.y:.2f}, th={msg.theta:.2f}) -> world ({self.target_pose.x:.2f}, {self.target_pose.y:.2f}, th={self.target_pose.theta:.2f})'
             )
 
     def right_arm_callback(self, msg: Float64MultiArray):
-        """Handle joint commands for right arm (5 joints)."""
-        if len(msg.data) != 5:
-            self.get_logger().warn(f'Right arm command has {len(msg.data)} values, expected 5')
+        """Handle joint commands for right arm (6 joints)."""
+        if len(msg.data) != 6:
+            self.get_logger().warn(f'Right arm command has {len(msg.data)} values, expected 6')
             return
         with self.lock:
             for i, name in enumerate(['right_waist', 'right_shoulder', 'right_elbow',
-                                       'right_wrist_angle', 'right_wrist_rotate']):
+                                       'right_forearm_roll', 'right_wrist_angle', 'right_wrist_rotate']):
                 if name in self.actuator_ids:
                     self.target_ctrl[self.actuator_ids[name]] = msg.data[i]
 
     def left_arm_callback(self, msg: Float64MultiArray):
-        """Handle joint commands for left arm (5 joints)."""
-        if len(msg.data) != 5:
-            self.get_logger().warn(f'Left arm command has {len(msg.data)} values, expected 5')
+        """Handle joint commands for left arm (6 joints)."""
+        if len(msg.data) != 6:
+            self.get_logger().warn(f'Left arm command has {len(msg.data)} values, expected 6')
             return
         with self.lock:
             for i, name in enumerate(['left_waist', 'left_shoulder', 'left_elbow',
-                                       'left_wrist_angle', 'left_wrist_rotate']):
+                                       'left_forearm_roll', 'left_wrist_angle', 'left_wrist_rotate']):
                 if name in self.actuator_ids:
                     self.target_ctrl[self.actuator_ids[name]] = msg.data[i]
 
@@ -304,8 +327,9 @@ class MuJoCoBridgeNode(Node):
         if len(msg.data) < 1:
             return
         # Convert normalized position to finger position
-        # 0.0 = closed (fingers together), 1.0 = open (fingers apart 22mm)
-        pos = msg.data[0] * 0.022  # 0.022m is max finger travel
+        # 0.0 = open (0.022m), 1.0 = closed (-0.014m)
+        # Maps [0,1] to [0.022, -0.014] (range of 0.036m)
+        pos = 0.022 - msg.data[0] * 0.036
         with self.lock:
             if 'right_left_finger' in self.actuator_ids:
                 idx = self.actuator_ids['right_left_finger']
@@ -319,7 +343,9 @@ class MuJoCoBridgeNode(Node):
         """Handle gripper command for left gripper (normalized 0-1)."""
         if len(msg.data) < 1:
             return
-        pos = msg.data[0] * 0.022
+        # Convert normalized position to finger position
+        # 0.0 = open (0.022m), 1.0 = closed (-0.014m)
+        pos = 0.022 - msg.data[0] * 0.036
         with self.lock:
             if 'left_left_finger' in self.actuator_ids:
                 self.target_ctrl[self.actuator_ids['left_left_finger']] = pos
@@ -364,13 +390,12 @@ class MuJoCoBridgeNode(Node):
         angle_to_target = np.arctan2(dy, dx)
 
         # Heading error (difference between current heading and angle to target)
-        # The robot model faces -Y at theta=0, so actual heading is theta - π/2
+        # MuJoCo theta=0 means facing -Y, so actual heading (0=+X) is theta - π/2
         actual_heading = th - np.pi / 2
         heading_error = self.normalize_angle(angle_to_target - actual_heading)
 
         # Final orientation error
-        # Both tth and th are in robot-relative terms (0 = initial direction)
-        # So no offset needed here
+        # Both tth and th are in MuJoCo theta (π/2 = facing +X)
         orientation_error = self.normalize_angle(tth - th)
 
         # Check if we've reached the goal
@@ -493,6 +518,12 @@ class MuJoCoBridgeNode(Node):
         now = self.get_clock().now().to_msg()
 
         with self.lock:
+            # One-time debug log
+            if not hasattr(self, '_logged_joints'):
+                self._logged_joints = True
+                self.get_logger().info(f'JOINT_NAMES has {len(self.JOINT_NAMES)} joints: {self.JOINT_NAMES}')
+                self.get_logger().info(f'joint_ids has {len(self.joint_ids)} joints: {list(self.joint_ids.keys())}')
+
             # Publish joint states
             joint_state = JointState()
             joint_state.header.stamp = now
@@ -500,25 +531,43 @@ class MuJoCoBridgeNode(Node):
 
             for name in self.JOINT_NAMES:
                 if name in self.joint_ids:
-                    joint_id = self.joint_ids[name]
-                    qpos_adr = self.model.jnt_qposadr[joint_id]
-                    qvel_adr = self.model.jnt_dofadr[joint_id]
+                    try:
+                        joint_id = self.joint_ids[name]
+                        qpos_adr = self.model.jnt_qposadr[joint_id]
+                        qvel_adr = self.model.jnt_dofadr[joint_id]
 
-                    # Get raw position and apply low-pass filter
-                    raw_pos = float(self.data.qpos[qpos_adr])
-                    if name in self.filtered_joint_positions:
-                        filtered_pos = (self.joint_filter_alpha * raw_pos +
-                                       (1 - self.joint_filter_alpha) * self.filtered_joint_positions[name])
-                    else:
-                        filtered_pos = raw_pos
-                    self.filtered_joint_positions[name] = filtered_pos
+                        # Get raw position and apply low-pass filter
+                        raw_pos = float(self.data.qpos[qpos_adr])
+                        if name in self.filtered_joint_positions:
+                            filtered_pos = (self.joint_filter_alpha * raw_pos +
+                                           (1 - self.joint_filter_alpha) * self.filtered_joint_positions[name])
+                        else:
+                            filtered_pos = raw_pos
+                        self.filtered_joint_positions[name] = filtered_pos
 
-                    joint_state.name.append(name)
-                    joint_state.position.append(filtered_pos)
-                    joint_state.velocity.append(float(self.data.qvel[qvel_adr]))
-                    joint_state.effort.append(0.0)  # MuJoCo doesn't directly expose this
+                        joint_state.name.append(name)
+                        joint_state.position.append(filtered_pos)
+                        joint_state.velocity.append(float(self.data.qvel[qvel_adr]))
+                        joint_state.effort.append(0.0)  # MuJoCo doesn't directly expose this
+                    except Exception as e:
+                        self.get_logger().error(f'Error reading joint {name}: {e}')
 
             self.joint_state_pub.publish(joint_state)
+
+            # Get actual base position from MuJoCo (not commanded position)
+            # This ensures TF matches the joint states for consistent visualization
+            actual_base_x = 0.0
+            actual_base_y = 0.0
+            actual_base_th = 0.0
+            if 'joint_x' in self.joint_ids:
+                qpos_adr = self.model.jnt_qposadr[self.joint_ids['joint_x']]
+                actual_base_x = float(self.data.qpos[qpos_adr])
+            if 'joint_y' in self.joint_ids:
+                qpos_adr = self.model.jnt_qposadr[self.joint_ids['joint_y']]
+                actual_base_y = float(self.data.qpos[qpos_adr])
+            if 'joint_th' in self.joint_ids:
+                qpos_adr = self.model.jnt_qposadr[self.joint_ids['joint_th']]
+                actual_base_th = float(self.data.qpos[qpos_adr])
 
             # Publish odometry
             odom = Odometry()
@@ -526,13 +575,13 @@ class MuJoCoBridgeNode(Node):
             odom.header.frame_id = 'odom'
             odom.child_frame_id = 'base_link'
 
-            odom.pose.pose.position.x = self.base_x
-            odom.pose.pose.position.y = self.base_y
+            odom.pose.pose.position.x = actual_base_x
+            odom.pose.pose.position.y = actual_base_y
             odom.pose.pose.position.z = 0.0
 
             # Convert yaw to quaternion
-            cy = np.cos(self.base_th * 0.5)
-            sy = np.sin(self.base_th * 0.5)
+            cy = np.cos(actual_base_th * 0.5)
+            sy = np.sin(actual_base_th * 0.5)
             odom.pose.pose.orientation.x = 0.0
             odom.pose.pose.orientation.y = 0.0
             odom.pose.pose.orientation.z = sy
@@ -542,13 +591,13 @@ class MuJoCoBridgeNode(Node):
 
             self.odom_pub.publish(odom)
 
-            # Publish TF: odom -> base_link
+            # Publish TF: odom -> base_link (using actual MuJoCo position)
             t = TransformStamped()
             t.header.stamp = now
             t.header.frame_id = 'odom'
             t.child_frame_id = 'base_link'
-            t.transform.translation.x = self.base_x
-            t.transform.translation.y = self.base_y
+            t.transform.translation.x = actual_base_x
+            t.transform.translation.y = actual_base_y
             t.transform.translation.z = 0.0
             t.transform.rotation.x = 0.0
             t.transform.rotation.y = 0.0
@@ -568,12 +617,16 @@ class MuJoCoBridgeNode(Node):
             # Render RGB image
             self.renderer.update_scene(self.data, camera='d435_rgb')
             rgb_image = self.renderer.render()
+            # Flip vertically to match ROS camera convention
+            rgb_image = np.flipud(rgb_image).copy()
 
             # Render depth image
             self.renderer.update_scene(self.data, camera='d435_depth')
             self.renderer.enable_depth_rendering()
             depth_image = self.renderer.render()
             self.renderer.disable_depth_rendering()
+            # Flip vertically to match ROS camera convention
+            depth_image = np.flipud(depth_image).copy()
 
         # Publish RGB image
         try:

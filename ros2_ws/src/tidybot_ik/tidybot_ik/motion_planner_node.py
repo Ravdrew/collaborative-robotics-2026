@@ -151,7 +151,7 @@ class MotionPlannerNode(Node):
     def get_arm_joint_positions(self, arm_name: str) -> np.ndarray:
         """Get current joint positions for an arm."""
         with self.joint_lock:
-            positions = np.zeros(5)
+            positions = np.zeros(6)
             for i, jname in enumerate(self.arm_joints[arm_name]):
                 positions[i] = self.current_joint_positions.get(jname, 0.0)
             return positions
@@ -220,7 +220,7 @@ class MotionPlannerNode(Node):
                 break
 
         # Extract solution for the arm
-        solution = np.zeros(5)
+        solution = np.zeros(6)
         for i, jname in enumerate(self.arm_joints[arm_name]):
             addr = self.joint_qpos_addrs[jname]
             solution[i] = self.configuration.q[addr]
@@ -286,8 +286,8 @@ class MotionPlannerNode(Node):
             dof_addr = self.model.jnt_dofadr[jid]
             arm_jac_cols.append(dof_addr)
 
-        J_pos = jacp[:, arm_jac_cols]  # 3x5 position Jacobian
-        J_rot = jacr[:, arm_jac_cols]  # 3x5 rotation Jacobian
+        J_pos = jacp[:, arm_jac_cols]  # 3x6 position Jacobian
+        J_rot = jacr[:, arm_jac_cols]  # 3x6 rotation Jacobian
 
         # Use position Jacobian for condition number (most relevant for manipulation)
         # Add small regularization to avoid numerical issues

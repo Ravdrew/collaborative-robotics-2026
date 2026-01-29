@@ -387,14 +387,14 @@ class InterbotixArmNode(Node):
             self.get_logger().info(f'Received arm command: {list(msg.data)}')
 
     def gripper_cmd_callback(self, msg: Float64MultiArray):
-        """Handle gripper commands (normalized 0-1)."""
+        """Handle gripper commands (normalized 0-1: 0.0 = open, 1.0 = closed)."""
         if len(msg.data) < 1:
             return
 
         # Convert normalized position to gripper angle
         gripper_target = max(0.0, min(1.0, msg.data[0]))
 
-        # WX250s gripper: open at 0, closed at ~0.037 rad
+        # WX250s gripper motor: 0 rad = open, ~0.037 rad = closed
         gripper_rad = gripper_target * 0.037
         counts = self._radians_to_counts(gripper_rad)
 
@@ -442,8 +442,8 @@ class InterbotixArmNode(Node):
                 msg.velocity.append(self.current_velocities[i])
                 msg.effort.append(0.0)
 
-            # Gripper joints (simplified - both fingers same position)
-            finger_pos = self.gripper_position * 0.037  # Normalize to meters
+            # Gripper joints - map normalized [0=open, 1=closed] to URDF slide joint [0.022=open, -0.014=closed]
+            finger_pos = 0.022 - self.gripper_position * 0.036
             msg.name.append(f'{self.arm_name}_left_finger')
             msg.position.append(finger_pos)
             msg.velocity.append(0.0)

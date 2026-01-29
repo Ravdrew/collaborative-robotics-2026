@@ -25,8 +25,8 @@ float64 max_condition_number 100.0
 # Whether planning succeeded (collision-free, no singularity)
 bool success
 
-# Joint positions solution (5 values if success)
-# Order: waist, shoulder, elbow, wrist_angle, wrist_rotate
+# Joint positions solution (6 values if success)
+# Order: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate
 float64[] joint_positions
 
 # Whether execution was attempted (only if success=true and execute=true)

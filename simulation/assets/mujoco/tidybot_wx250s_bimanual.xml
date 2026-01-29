@@ -216,7 +216,7 @@
                           <!-- Left finger -->
                           <body name="right_left_finger_link" pos="0 0.015 0">
                             <inertial pos="0.01382 0 0" mass="0.016246" diaginertia="0.00000473 0.00000155 0.00000375"/>
-                            <joint name="right_left_finger" type="slide" axis="0 1 0" range="0.015 0.037" damping="0.1"/>
+                            <joint name="right_left_finger" type="slide" axis="0 1 0" range="-0.014 0.022" damping="0.1"/>
                             <geom type="mesh" mesh="wx250s_gripper_finger" pos="0 0.005 0" euler="3.14159 3.14159 0"
                                   contype="1" conaffinity="1" group="2" rgba="0.3 0.3 0.3 1" friction="1 0.5 0.001"/>
                           </body>
@@ -224,7 +224,7 @@
                           <!-- Right finger (mirrors left) -->
                           <body name="right_right_finger_link" pos="0 -0.015 0">
                             <inertial pos="0.01382 0 0" mass="0.016246" diaginertia="0.00000473 0.00000155 0.00000375"/>
-                            <joint name="right_right_finger" type="slide" axis="0 -1 0" range="0.015 0.037" damping="0.1"/>
+                            <joint name="right_right_finger" type="slide" axis="0 -1 0" range="-0.014 0.022" damping="0.1"/>
                             <geom type="mesh" mesh="wx250s_gripper_finger" pos="0 -0.005 0" euler="0 3.14159 0"
                                   contype="1" conaffinity="1" group="2" rgba="0.3 0.3 0.3 1" friction="1 0.5 0.001"/>
                           </body>
@@ -297,7 +297,7 @@
                           <!-- Left finger -->
                           <body name="left_left_finger_link" pos="0 0.015 0">
                             <inertial pos="0.01382 0 0" mass="0.016246" diaginertia="0.00000473 0.00000155 0.00000375"/>
-                            <joint name="left_left_finger" type="slide" axis="0 1 0" range="0.015 0.037" damping="0.1"/>
+                            <joint name="left_left_finger" type="slide" axis="0 1 0" range="-0.014 0.022" damping="0.1"/>
                             <geom type="mesh" mesh="wx250s_gripper_finger" pos="0 0.005 0" euler="3.14159 3.14159 0"
                                   contype="1" conaffinity="1" group="2" rgba="0.3 0.3 0.3 1" friction="1 0.5 0.001"/>
                           </body>
@@ -305,7 +305,7 @@
                           <!-- Right finger (mirrors left) -->
                           <body name="left_right_finger_link" pos="0 -0.015 0">
                             <inertial pos="0.01382 0 0" mass="0.016246" diaginertia="0.00000473 0.00000155 0.00000375"/>
-                            <joint name="left_right_finger" type="slide" axis="0 -1 0" range="0.015 0.037" damping="0.1"/>
+                            <joint name="left_right_finger" type="slide" axis="0 -1 0" range="-0.014 0.022" damping="0.1"/>
                             <geom type="mesh" mesh="wx250s_gripper_finger" pos="0 -0.005 0" euler="0 3.14159 0"
                                   contype="1" conaffinity="1" group="2" rgba="0.3 0.3 0.3 1" friction="1 0.5 0.001"/>
                           </body>
@@ -345,8 +345,8 @@
     <position class="small_actuator" name="right_wrist_rotate" joint="right_wrist_rotate"/>
 
     <!-- Right WX250s gripper actuators (prismatic fingers) -->
-    <position name="right_left_finger" joint="right_left_finger" kp="100" kv="10" ctrlrange="0.015 0.037"/>
-    <position name="right_right_finger" joint="right_right_finger" kp="100" kv="10" ctrlrange="0.015 0.037"/>
+    <position name="right_left_finger" joint="right_left_finger" kp="100" kv="10" ctrlrange="-0.014 0.022"/>
+    <position name="right_right_finger" joint="right_right_finger" kp="100" kv="10" ctrlrange="-0.014 0.022"/>
 
     <!-- Left WX250s arm actuators (6-DOF) -->
     <position class="small_actuator" name="left_waist" joint="left_waist"/>
@@ -357,22 +357,22 @@
     <position class="small_actuator" name="left_wrist_rotate" joint="left_wrist_rotate"/>
 
     <!-- Left WX250s gripper actuators (prismatic fingers) -->
-    <position name="left_left_finger" joint="left_left_finger" kp="100" kv="10" ctrlrange="0.015 0.037"/>
-    <position name="left_right_finger" joint="left_right_finger" kp="100" kv="10" ctrlrange="0.015 0.037"/>
+    <position name="left_left_finger" joint="left_left_finger" kp="100" kv="10" ctrlrange="-0.014 0.022"/>
+    <position name="left_right_finger" joint="left_right_finger" kp="100" kv="10" ctrlrange="-0.014 0.022"/>
   </actuator>
 
   <keyframe>
     <!-- qpos order: base(3) + pan_tilt(2) + right_arm(6) + right_gripper(2) + left_arm(6) + left_gripper(2) = 21 -->
     <!-- ctrl order: base(3) + pan_tilt(2) + right_arm(6) + right_gripper(2) + left_arm(6) + left_gripper(2) = 21 -->
-    <key name="home" qpos="0 0 0
+    <key name="home" qpos="0 0 1.5708
       0 0
-      0 0 0 0 0 0 0.015 0.015
-      0 0 0 0 0 0 0.015 0.015"
-      ctrl="0 0 0 0 0 0 0 0 0 0 0 0.015 0.015 0 0 0 0 0 0 0.015 0.015"/>
-    <key name="retract" qpos="0 0 0
+      0 0 0 0 0 0 0.022 0.022
+      0 0 0 0 0 0 0.022 0.022"
+      ctrl="0 0 1.5708 0 0 0 0 0 0 0 0 0.022 0.022 0 0 0 0 0 0 0.022 0.022"/>
+    <key name="retract" qpos="0 0 1.5708
       0 0
-      0 -0.5 1.57 0 0 0 0.015 0.015
-      0 -0.5 1.57 0 0 0 0.015 0.015"
-      ctrl="0 0 0 0 0 0 -0.5 1.57 0 0 0 0.015 0.015 0 -0.5 1.57 0 0 0 0.015 0.015"/>
+      0 -0.5 1.57 0 0 0 0.022 0.022
+      0 -0.5 1.57 0 0 0 0.022 0.022"
+      ctrl="0 0 1.5708 0 0 0 -0.5 1.57 0 0 0 0.022 0.022 0 -0.5 1.57 0 0 0 0.022 0.022"/>
   </keyframe>
 </mujoco>

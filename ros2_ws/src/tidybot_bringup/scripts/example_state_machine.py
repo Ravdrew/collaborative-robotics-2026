@@ -61,8 +61,8 @@ MOVE_SPEED = 0.2         # m/s
 ARM_MOVE_DURATION = 2.0  # seconds
 GRIPPER_CLOSE_TIME = 1.0 # seconds
 
-# Arm positions: [waist, shoulder, elbow, wrist_angle, wrist_rotate]
-ARM_DOWN_POSITION = [0.0, 0.8, 0.4, 0.0, 0.0]  # Arms reaching down/forward
+# Arm positions: [waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate]
+ARM_DOWN_POSITION = [0.0, 0.8, 0.4, 0.0, 0.0, 0.0]  # Arms reaching down/forward
 
 
 class StateMachineExample(Node):

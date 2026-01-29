@@ -518,18 +518,18 @@ class DynamixelBusNode(Node):
             self.get_logger().info(f'Received {arm_name} arm command: {list(msg.data)}')
 
     def _gripper_cmd_callback(self, msg, arm_name):
-        """Handle gripper commands (0-1 normalized)."""
+        """Handle gripper commands (0-1 normalized: 0.0 = open, 1.0 = closed)."""
         if len(msg.data) < 1:
             return
 
         gripper_val = max(0.0, min(1.0, msg.data[0]))
         with self.lock:
             if arm_name == 'right':
-                self.right_gripper_target = gripper_val * 0.037  # Convert to radians
+                self.right_gripper_target = gripper_val * 0.037  # 0=open(0rad), 1=closed(0.037rad)
                 if self.RIGHT_GRIPPER_ID in self.active_motors:
                     self._write_motor(self.RIGHT_GRIPPER_ID, self.right_gripper_target)
             else:
-                self.left_gripper_target = gripper_val * 0.037
+                self.left_gripper_target = gripper_val * 0.037  # 0=open(0rad), 1=closed(0.037rad)
                 if self.LEFT_GRIPPER_ID in self.active_motors:
                     self._write_motor(self.LEFT_GRIPPER_ID, self.left_gripper_target)
 
@@ -709,8 +709,9 @@ class DynamixelBusNode(Node):
                     msg.velocity.append(0.0)
                     msg.effort.append(0.0)
 
-                # Gripper fingers
-                finger_pos = self.right_gripper_pos
+                # Gripper fingers - convert motor radians (0=open, 0.037=closed)
+                # to URDF slide joint meters (0.022=open, -0.014=closed)
+                finger_pos = 0.022 - (self.right_gripper_pos / 0.037) * 0.036
                 msg.name.append('right_left_finger')
                 msg.position.append(finger_pos)
                 msg.velocity.append(0.0)
@@ -727,7 +728,8 @@ class DynamixelBusNode(Node):
                     msg.velocity.append(0.0)
                     msg.effort.append(0.0)
 
-                finger_pos = self.left_gripper_pos
+                # Convert motor radians to URDF slide joint meters (0.022=open, -0.014=closed)
+                finger_pos = 0.022 - (self.left_gripper_pos / 0.037) * 0.036
                 msg.name.append('left_left_finger')
                 msg.position.append(finger_pos)
                 msg.velocity.append(0.0)

@@ -73,7 +73,7 @@ class TestArms(Node):
         pub.publish(cmd)
 
     def send_gripper_command(self, pub, position):
-        """Send gripper command with normalized position (0.0 = closed, 1.0 = open)."""
+        """Send gripper command with normalized position (0.0 = open, 1.0 = closed)."""
         msg = Float64MultiArray()
         msg.data = [float(position)]
         pub.publish(msg)
@@ -106,32 +106,32 @@ class TestArms(Node):
 
         # State: Open grippers
         if self.state == 'OPEN_GRIPPERS':
-            self.send_gripper_command(self.right_gripper_pub, 1.0)
-            self.send_gripper_command(self.left_gripper_pub, 1.0)
+            self.send_gripper_command(self.right_gripper_pub, 0.0)
+            self.send_gripper_command(self.left_gripper_pub, 0.0)
             if elapsed > 1.0:
                 self.state = 'MOVE_ARMS'
                 self.state_start_time = now
 
         # State: Move arms forward
         elif self.state == 'MOVE_ARMS':
-            self.send_gripper_command(self.right_gripper_pub, 1.0)
-            self.send_gripper_command(self.left_gripper_pub, 1.0)
+            self.send_gripper_command(self.right_gripper_pub, 0.0)
+            self.send_gripper_command(self.left_gripper_pub, 0.0)
             if elapsed > MOVE_DURATION + 0.5:
                 self.state = 'CLOSE_GRIPPERS'
                 self.state_start_time = now
 
         # State: Close grippers
         elif self.state == 'CLOSE_GRIPPERS':
-            self.send_gripper_command(self.right_gripper_pub, 0.0)
-            self.send_gripper_command(self.left_gripper_pub, 0.0)
+            self.send_gripper_command(self.right_gripper_pub, 1.0)
+            self.send_gripper_command(self.left_gripper_pub, 1.0)
             if elapsed > 1.0:
                 self.state = 'DONE'
                 self.state_start_time = now
 
         # State: Done
         elif self.state == 'DONE':
-            self.send_gripper_command(self.right_gripper_pub, 0.0)
-            self.send_gripper_command(self.left_gripper_pub, 0.0)
+            self.send_gripper_command(self.right_gripper_pub, 1.0)
+            self.send_gripper_command(self.left_gripper_pub, 1.0)
 
 
 def main(args=None):
