@@ -51,6 +51,7 @@ def launch_setup(context, *args, **kwargs):
     use_camera = LaunchConfiguration('use_camera').perform(context) == 'true'
     use_compression = LaunchConfiguration('use_compression').perform(context) == 'true'
     use_rviz = LaunchConfiguration('use_rviz').perform(context) == 'true'
+    use_planner = LaunchConfiguration('use_planner').perform(context) == 'true'
     load_configs = LaunchConfiguration('load_configs').perform(context) == 'true'
 
     # Get project root for uv packages
@@ -61,10 +62,13 @@ def launch_setup(context, *args, **kwargs):
     # UV virtual environment site-packages
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     uv_site_packages = os.path.join(project_root, '.venv', 'lib', f'python{python_version}', 'site-packages')
+    # cmeel packages (pinocchio, hpp-fcl) are in a nested directory
+    cmeel_site_packages = os.path.join(uv_site_packages, 'cmeel.prefix', 'lib', f'python{python_version}', 'site-packages')
 
-    # Build PYTHONPATH with uv packages
+    # Build PYTHONPATH with uv packages (include both paths)
     existing_pythonpath = os.environ.get('PYTHONPATH', '')
-    new_pythonpath = f"{uv_site_packages}:{existing_pythonpath}" if existing_pythonpath else uv_site_packages
+    uv_paths = f"{uv_site_packages}:{cmeel_site_packages}"
+    new_pythonpath = f"{uv_paths}:{existing_pythonpath}" if existing_pythonpath else uv_paths
 
     # Environment for nodes needing uv packages
     hw_node_env = {
@@ -239,6 +243,25 @@ def launch_setup(context, *args, **kwargs):
             parameters=[{'use_sim_time': False}]
         ))
 
+    # Motion planner (IK) for real hardware
+    if use_planner:
+        urdf_path = PathJoinSubstitution([pkg_description, 'urdf', 'tidybot_wx250s.urdf.xacro'])
+        nodes.append(Node(
+            package='tidybot_ik',
+            executable='motion_planner_real_node',
+            name='motion_planner',
+            output='screen',
+            additional_env=hw_node_env,
+            parameters=[{
+                'urdf_path': urdf_path,
+                'ik_dt': 0.3,
+                'ik_max_iterations': 200,
+                'position_tolerance': 0.03,  # 3cm tolerance for real hardware
+                'orientation_tolerance': 0.1,
+                'min_collision_distance': 0.05,
+            }]
+        ))
+
     return nodes
 
 
@@ -272,6 +295,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_compression', default_value='false',
             description='Launch image compression for remote clients'
+        ),
+        DeclareLaunchArgument(
+            'use_planner', default_value='false',
+            description='Launch IK motion planner for real hardware'
         ),
         DeclareLaunchArgument(
             'load_configs', default_value='true',

@@ -32,6 +32,8 @@ install(PROGRAMS
   scripts/test_pan_tilt_real.py
   scripts/test_torque_hold.py
   scripts/test_full_robot.py
+  scripts/test_tf.py
+  scripts/test_planner_real.py
   scripts/diagnose_dynamixel.py
   scripts/example_state_machine.py
   scripts/trajectory_tracking.py
