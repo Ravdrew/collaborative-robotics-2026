@@ -84,6 +84,7 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 # Launch robot
 cd ~/collaborative-robotics-2026/ros2_ws
+source setup_env.bash
 source install/setup.bash
 ros2 launch tidybot_bringup robot.launch.py
 ```
