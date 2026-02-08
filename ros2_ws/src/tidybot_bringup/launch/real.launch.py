@@ -232,8 +232,8 @@ def launch_setup(context, *args, **kwargs):
                 'enable_infra1': False,
                 'enable_infra2': False,
                 'publish_tf': False,
-                'rgb_camera.color_profile': '640x480x15',
-                'depth_module.depth_profile': '640x480x15',
+                'rgb_camera.color_profile': '424x240x15',
+                'depth_module.depth_profile': '424x240x15',
             }],
             remappings=[
                 ('/camera/realsense/color/image_raw', '/camera/color/image_raw'),
