@@ -823,8 +823,11 @@ rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.r
 ### High latency
 
 1. **Check WiFi signal strength**
-2. **Use Ethernet if possible**
+2. **Use Ethernet if possible** (for local network)
 3. **Enable image compression** with `use_compression:=true`
+4. **For Tailscale**: Check connection type with `tailscale status`
+   - "direct" connection is best (peer-to-peer)
+   - "relay" connection adds latency but works through any firewall
 
 ### "Failed to connect to arm"
 
