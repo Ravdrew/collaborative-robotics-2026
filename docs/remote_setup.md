@@ -25,7 +25,7 @@ This guide explains how to control TidyBot2 remotely over the network using nati
 │              └─────────────────┘                                        │
 └──────────────────────────────────────────────────────────────────────────┘
                               │
-                     WiFi / Ethernet
+                     WiFi / Ethernet / Tailscale VPN
                               │
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                    YOUR MACHINE (Remote Client)                          │
@@ -82,6 +82,7 @@ Your code → /right_arm/joint_cmd → arm_wrapper (velocity limiting) → xs_sd
 ### Network Requirements
 
 - Client and robot on the **same network** (same WiFi or Ethernet subnet)
+- **OR** connected via Tailscale VPN (see Option D below for remote access from anywhere)
 - If multicast is blocked, use FastDDS Discovery Server mode (see below)
 
 ## Quick Start
@@ -232,6 +233,135 @@ export ROS_DOMAIN_ID=42
 ### Option C: Zenoh Bridge (Enterprise-Grade)
 
 For complex network topologies. See [Zenoh documentation](https://zenoh.io/docs/getting-started/first-app/).
+
+### Option D: Tailscale VPN (Remote Access from Anywhere)
+
+Use Tailscale to securely connect to the robot from anywhere, even across different networks or from outside your lab/building. This is the easiest way to get remote access without port forwarding or VPN configuration.
+
+#### Why Use Tailscale?
+
+- **Access from anywhere**: Control the robot from home, coffee shops, or different networks
+- **No port forwarding needed**: Works through NAT and firewalls automatically
+- **Encrypted connection**: All traffic is secured via WireGuard
+- **Simple setup**: Just install and authenticate on both machines
+- **Direct peer-to-peer**: Low latency compared to traditional VPNs
+- **Works with ROS2**: DDS multicast works over Tailscale network
+
+#### Installation
+
+**On the Robot (TidyBot2 mini PC):**
+
+```bash
+# SSH into the robot
+ssh locobot@192.168.0.207
+
+# Install Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Start Tailscale and authenticate
+sudo tailscale up
+
+# Follow the link in terminal to authenticate with your Tailscale account
+# The robot will now appear in your Tailscale network
+```
+
+**On Your Client Machine:**
+
+For **Linux**:
+```bash
+# Install Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Start and authenticate
+sudo tailscale up
+```
+
+For **macOS**:
+```bash
+# Download from https://tailscale.com/download/mac
+# Or install via Homebrew (CLI-only):
+brew install tailscale
+sudo brew services start tailscale
+sudo tailscale up
+```
+
+For **Windows** (if using WSL2):
+- Install Tailscale on Windows (not inside WSL)
+- Download from https://tailscale.com/download/windows
+- WSL2 will automatically have access to the Tailscale network
+
+#### Usage with ROS2
+
+Once both machines are connected to Tailscale:
+
+1. **Find the robot's Tailscale IP:**
+   ```bash
+   # On the robot
+   tailscale ip -4
+   # Example output: 100.101.102.103
+   ```
+
+2. **Connect from your client using Tailscale IP:**
+   ```bash
+   # SSH via Tailscale (works from anywhere!)
+   ssh locobot@100.101.102.103
+
+   # Or use the Tailscale machine name
+   ssh locobot@tidybot2-nuc
+   ```
+
+3. **Configure ROS2 environment:**
+   ```bash
+   # On both robot and client
+   export ROS_DOMAIN_ID=42
+   export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+   # Source your workspace
+   source ~/ros2_ws/install/setup.bash
+   ```
+
+4. **ROS2 should now work over Tailscale:**
+   ```bash
+   # Test from your client machine
+   ros2 topic list
+   ros2 topic echo /joint_states
+   ```
+
+#### Cyclone DDS Configuration for Tailscale
+
+If multicast doesn't work automatically over Tailscale, create a Cyclone DDS config file:
+
+**cyclone_tailscale.xml:**
+```xml
+<?xml version="1.0" encoding="UTF-8" ?>
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain id="any">
+    <General>
+      <NetworkInterfaceAddress>tailscale0</NetworkInterfaceAddress>
+    </General>
+  </Domain>
+</CycloneDDS>
+```
+
+Then use it:
+```bash
+export CYCLONEDDS_URI=file:///path/to/cyclone_tailscale.xml
+```
+
+#### Tailscale Advantages for Robotics
+
+- **No firewall configuration needed**: Tailscale handles NAT traversal
+- **Mobile access**: Control robot from your phone or laptop anywhere
+- **Team access**: Share access to the robot with teammates easily
+- **SSH simplification**: No need to remember changing local IPs
+- **Image compression recommended**: Enable `use_compression:=true` for camera topics over Tailscale
+
+#### Tailscale Tips
+
+- **Persistent connection**: Tailscale stays connected across reboots (if configured)
+- **Exit nodes**: Can use your lab network as an exit node for full network access
+- **Subnet routing**: Can expose the entire robot's local network if needed
+- **MagicDNS**: Use machine names instead of IPs (e.g., `tidybot2-nuc`)
 
 ## ROS2 Topics Reference
 
@@ -422,7 +552,12 @@ rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.r
 
 3. **Check network connectivity:**
    ```bash
+   # For local network
    ping <ROBOT_IP>
+   
+   # For Tailscale
+   tailscale ping <ROBOT_TAILSCALE_IP>
+   tailscale status  # Check if both machines are connected
    ```
 
 4. **Check firewall (temporarily disable for testing):**
@@ -432,6 +567,46 @@ rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.r
 
 5. **Try explicit peer list (Cyclone DDS):**
    Edit `cyclone_dds_client.xml` and add robot IP explicitly.
+
+### Tailscale-specific issues
+
+1. **Check Tailscale connection:**
+   ```bash
+   tailscale status
+   # Both machines should show as "active; relay ..." or "active; direct ..."
+   ```
+
+2. **Verify Tailscale IPs:**
+   ```bash
+   # On robot
+   tailscale ip -4
+   
+   # On client
+   tailscale ip -4
+   
+   # Both should have IPs in 100.x.x.x range
+   ```
+
+3. **Test Tailscale connectivity:**
+   ```bash
+   # From client, ping the robot's Tailscale IP
+   ping <ROBOT_TAILSCALE_IP>
+   ```
+
+4. **Check Tailscale subnet routes:**
+   ```bash
+   # If you need access to robot's local network
+   tailscale status
+   # Look for "relay" vs "direct" connection
+   ```
+
+5. **Enable image compression over Tailscale:**
+   ```bash
+   # On robot
+   ros2 launch tidybot_bringup real.launch.py use_compression:=true
+   
+   # Reduces bandwidth from ~14 MB/s to ~1-2 MB/s
+   ```
 
 ### Camera images not appearing / slow
 
@@ -444,14 +619,18 @@ rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.r
 2. **Check bandwidth:**
    - Raw images (640x480 @ 15fps): ~14 MB/s
    - Compressed images: ~1-2 MB/s
+   - **Important**: Always use compression when connecting over Tailscale
 
 3. **Camera resolution** is set to 640x480 @ 15fps by default in the launch file.
 
 ### High latency
 
 1. **Check WiFi signal strength**
-2. **Use Ethernet if possible**
+2. **Use Ethernet if possible** (for local network)
 3. **Enable image compression** with `use_compression:=true`
+4. **For Tailscale**: Check connection type with `tailscale status`
+   - "direct" connection is best (peer-to-peer)
+   - "relay" connection adds latency but works through any firewall
 
 ### "Failed to connect to arm"
 
@@ -487,12 +666,15 @@ export TIDYBOT_REPO_ROOT=/home/locobot/collaborative-robotics-2026
 ## Security Notes
 
 - ROS2 DDS traffic is **not encrypted by default**
-- For production use, enable DDS security features
-- Don't expose ROS2 ports to the internet
-- Use VPN for remote access outside local network
+- **Tailscale encrypts all traffic** via WireGuard protocol
+- For production use without Tailscale, enable DDS security features
+- Don't expose ROS2 ports to the internet without VPN
+- **Recommended**: Use Tailscale for all remote access outside local network
 
 ## Further Reading
 
 - [ROS2 Networking Concepts](https://docs.ros.org/en/humble/Concepts/About-Different-Middleware-Vendors.html)
 - [Cyclone DDS Configuration](https://cyclonedds.io/docs/)
 - [FastDDS Discovery Server](https://fast-dds.docs.eprosima.com/en/latest/fastdds/discovery/discovery_server.html)
+- [Tailscale Documentation](https://tailscale.com/kb/)
+- [Tailscale ROS2 Best Practices](https://tailscale.com/kb/)
