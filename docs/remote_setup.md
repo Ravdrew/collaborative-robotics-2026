@@ -5,41 +5,55 @@ This guide explains how to control TidyBot2 remotely over the network using nati
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    MINI PC (TidyBot2 Robot)                     │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │                   ROS2 Network (DDS)                      │  │
-│  │  /cmd_vel  /joint_states  /odom  /camera/*  /arm/cmd     │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│        ▲              ▲              ▲              ▲          │
-│        │              │              │              │          │
-│  ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐  │
-│  │ Phoenix6  │  │ Interbotix│  │ RealSense │  │ Pan-Tilt  │  │
-│  │ Base Node │  │ Arm Nodes │  │ Camera    │  │ Camera    │  │
-│  └───────────┘  └───────────┘  └───────────┘  └───────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                       MINI PC (TidyBot2 Robot)                          │
+│                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────┐  │
+│  │                      ROS2 Network (DDS)                            │  │
+│  │  /cmd_vel  /joint_states  /odom  /camera/*  /right_arm/joint_cmd  │  │
+│  └────────────────────────────────────────────────────────────────────┘  │
+│        ▲              ▲              ▲              ▲          ▲        │
+│        │              │              │              │          │        │
+│  ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐ ┌┴──────┐│
+│  │ Phoenix6  │  │ Interbotix│  │ RealSense │  │ Pan-Tilt  │ │Micro- ││
+│  │ Base Node │  │ xs_sdk x2 │  │ Camera    │  │ (on U2D2) │ │phone  ││
+│  └───────────┘  └───────────┘  └───────────┘  └───────────┘ └────────┘│
+│                       │                                                 │
+│              ┌────────┴────────┐                                        │
+│              │  arm_wrapper    │  (sim-compatible topic translation)     │
+│              │  gripper_wrapper│                                        │
+│              └─────────────────┘                                        │
+└──────────────────────────────────────────────────────────────────────────┘
                               │
                      WiFi / Ethernet
                               │
-┌─────────────────────────────────────────────────────────────────┐
-│                  YOUR MACHINE (Remote Client)                    │
-│                                                                 │
-│  ROS2 Humble + Same Domain ID = Direct topic access             │
-│                                                                 │
-│  ros2 topic pub /cmd_vel geometry_msgs/msg/Twist ...            │
-│  ros2 topic echo /joint_states                                  │
-│  ros2 run your_package your_node                                │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    YOUR MACHINE (Remote Client)                          │
+│                                                                          │
+│  ROS2 Humble + Same Domain ID = Direct topic access                       │
+│                                                                          │
+│  ros2 topic pub /cmd_vel geometry_msgs/msg/Twist ...                     │
+│  ros2 topic echo /joint_states                                           │
+│  python3 my_robot_control.py  ← same code works in sim and real!         │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Key Principle: Native ROS2 Networking
+## Key Principle: Sim-to-Real Topic Compatibility
 
-You run **real ROS2 nodes** on your machine, not a custom client library. This:
-- Teaches proper ROS2 usage
-- Uses standard ROS2 tools (`ros2 topic`, `ros2 run`, `rviz2`)
-- Code written for simulation works unchanged on real robot
+You run **real ROS2 nodes** on your machine, not a custom client library. The robot uses **sim-compatible topic wrappers** (enabled by default) so that:
+- The **same topics and code** work in both simulation (`sim.launch.py`) and real hardware (`real.launch.py`)
+- Standard ROS2 tools work (`ros2 topic`, `ros2 run`, `rviz2`)
 - Skills transfer to any ROS2 robot
+
+**Simulation path:**
+```
+Your code → /right_arm/joint_cmd → MuJoCo bridge → physics sim → /joint_states
+```
+
+**Real hardware path (use_sim_topics:=true, default):**
+```
+Your code → /right_arm/joint_cmd → arm_wrapper (velocity limiting) → xs_sdk → Dynamixel servos
+```
 
 ## Prerequisites
 
@@ -76,19 +90,20 @@ You run **real ROS2 nodes** on your machine, not a custom client library. This:
 
 ```bash
 # SSH into robot
-ssh locobot@192.168.0.207 
-# NUC Ip address may change, check with ifconfig if not accessible
+ssh locobot@192.168.0.207
+# NUC IP address may change, check with ifconfig if not accessible
 # ssh password: locobot
 
-# Set up environment
-export ROS_DOMAIN_ID=42
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-
-# Launch robot
+# Set up environment (sources ROS2, sets PYTHONPATH, builds workspace,
+# sets ROS_DOMAIN_ID=42 and RMW_IMPLEMENTATION=rmw_cyclonedds_cpp)
 cd ~/collaborative-robotics-2026/ros2_ws
 source setup_env.bash
-source install/setup.bash
-ros2 launch tidybot_bringup robot.launch.py
+
+# Launch robot (all hardware enabled by default)
+ros2 launch tidybot_bringup real.launch.py
+
+# To use IK controller
+ros2 launch tidybot_bringup real.launch.py use_planner:=true
 ```
 
 ### Step 2: Connect Client (on your machine)
@@ -110,9 +125,13 @@ You should see topics like:
 /cmd_vel
 /odom
 /joint_states
-/right_arm/command
-/left_arm/command
+/right_arm/joint_cmd
+/left_arm/joint_cmd
+/right_gripper/cmd
+/left_gripper/cmd
 /camera/color/image_raw
+/camera/depth/image_raw
+/camera/pan_tilt_cmd
 ...
 ```
 
@@ -131,9 +150,40 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.1}}" -r 10
 # Read joint states
 ros2 topic echo /joint_states
 
-# Send arm command (using test script)
-ros2 run tidybot_bringup test_arms_sim.py
+# Move right arm (6 joint positions as Float64MultiArray)
+ros2 topic pub /right_arm/joint_cmd std_msgs/msg/Float64MultiArray "{data: [0.0, -0.5, 0.5, 0.0, 0.0, 0.0]}" --once
+
+# Open right gripper (Float64MultiArray, 0.0 = open, 1.0 = closed)
+ros2 topic pub /right_gripper/cmd std_msgs/msg/Float64MultiArray "{data: [0.0]}" --once
 ```
+
+## Launch File Reference
+
+### `real.launch.py` — Real Hardware
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `use_rviz` | `true` | Launch RViz for visualization |
+| `use_base` | `true` | Phoenix 6 mobile base driver |
+| `use_arms` | `true` | Interbotix arm drivers (dual U2D2) |
+| `use_left_arm` | `true` | Left arm on U2D2 #2 |
+| `use_pan_tilt` | `true` | Pan-tilt on U2D2 #1 (with right arm) |
+| `use_camera` | `true` | RealSense D435 camera |
+| `use_compression` | `false` | Image compression for remote clients |
+| `use_microphone` | `true` | Microphone recording node |
+| `use_planner` | `false` | IK motion planner (Pinocchio-based) |
+| `use_sim_topics` | `true` | Sim-compatible topic wrappers |
+| `load_configs` | `true` | Load motor configs from YAML files |
+
+### `sim.launch.py` — MuJoCo Simulation
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `scene` | `scene_wx250s_bimanual.xml` | MuJoCo scene file |
+| `use_rviz` | `true` | Launch RViz |
+| `show_mujoco_viewer` | `true` | Show MuJoCo viewer window |
+| `use_sim_time` | `true` | Use simulation time |
+| `use_motion_planner` | `true` | Launch IK motion planner (Mink-based) |
 
 ## Network Configuration Options
 
@@ -166,7 +216,7 @@ fastdds discovery --server-id 0 --port 11811
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 export FASTRTPS_DEFAULT_PROFILES_FILE=$(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/config/fastdds_robot.xml
 export ROS_DOMAIN_ID=42
-ros2 launch tidybot_bringup robot.launch.py
+ros2 launch tidybot_bringup real.launch.py
 ```
 
 **Client:**
@@ -194,24 +244,49 @@ For complex network topologies. See [Zenoh documentation](https://zenoh.io/docs/
 | `/odom` | `nav_msgs/Odometry` | Odometry feedback |
 | `/base/goal_reached` | `std_msgs/Bool` | True when target pose reached |
 
-### Arms
+### Arms (sim-compatible topics, `use_sim_topics:=true`)
+
+These topics work identically in simulation and on real hardware:
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `/right_arm/command` | `tidybot_msgs/ArmCommand` | Right arm joint positions + duration |
-| `/left_arm/command` | `tidybot_msgs/ArmCommand` | Left arm joint positions + duration |
-| `/right_gripper/command` | `tidybot_msgs/GripperCommand` | Right gripper (0=open, 1=closed) |
-| `/left_gripper/command` | `tidybot_msgs/GripperCommand` | Left gripper |
-| `/joint_states` | `sensor_msgs/JointState` | All joint positions/velocities |
+| `/right_arm/joint_cmd` | `std_msgs/Float64MultiArray` | Right arm 6-joint positions [waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate] |
+| `/left_arm/joint_cmd` | `std_msgs/Float64MultiArray` | Left arm 6-joint positions |
+| `/right_gripper/cmd` | `std_msgs/Float64MultiArray` | Right gripper (0.0=open, 1.0=closed) |
+| `/left_gripper/cmd` | `std_msgs/Float64MultiArray` | Left gripper |
+| `/right_arm/command` | `tidybot_msgs/ArmCommand` | Right arm with duration (trajectory interpolation) |
+| `/left_arm/command` | `tidybot_msgs/ArmCommand` | Left arm with duration |
+| `/joint_states` | `sensor_msgs/JointState` | All joint positions/velocities (aggregated) |
 
 ### Camera
 
 | Topic | Type | Description |
 |-------|------|-------------|
-| `/camera/color/image_raw` | `sensor_msgs/Image` | RGB camera feed |
-| `/camera/color/image_compressed` | `sensor_msgs/CompressedImage` | Compressed RGB (lower bandwidth) |
-| `/camera/depth/image_raw` | `sensor_msgs/Image` | Depth camera feed |
+| `/camera/color/image_raw` | `sensor_msgs/Image` | RGB camera feed (640x480 @ 15fps) |
+| `/camera/depth/image_raw` | `sensor_msgs/Image` | Depth camera feed (640x480 @ 15fps) |
+| `/camera/color/camera_info` | `sensor_msgs/CameraInfo` | RGB camera intrinsics |
+| `/camera/depth/camera_info` | `sensor_msgs/CameraInfo` | Depth camera intrinsics |
+| `/camera/color/image_compressed` | `sensor_msgs/CompressedImage` | JPEG compressed RGB (requires `use_compression:=true`) |
+| `/camera/depth/image_compressed` | `sensor_msgs/CompressedImage` | PNG compressed depth (requires `use_compression:=true`) |
 | `/camera/pan_tilt_cmd` | `std_msgs/Float64MultiArray` | Pan/tilt angles [pan, tilt] radians |
+| `/camera/pan_tilt_state` | `sensor_msgs/JointState` | Current pan/tilt positions |
+
+### Custom Messages (`tidybot_msgs`)
+
+| Message | Fields | Description |
+|---------|--------|-------------|
+| `ArmCommand` | `header`, `float64[6] joint_positions`, `float64 duration` | Target arm pose with interpolation time |
+| `ArmVelocityCommand` | `header`, `float64[6] joint_velocities`, `float64 duration` | Joint velocity command |
+| `CartesianVelocityCommand` | `header`, `Twist twist`, `string frame_id`, `float64 duration` | End-effector velocity in task space |
+| `GripperCommand` | `header`, `float64 position`, `float64 effort` | Gripper (0=open, 1=closed) with effort |
+| `PanTilt` | `header`, `float64 pan`, `float64 tilt` | Pan-tilt angles in radians |
+
+### Services
+
+| Service | Type | Description |
+|---------|------|-------------|
+| `/plan_to_target` | `tidybot_msgs/PlanToTarget` | Plan and execute arm motion with collision/singularity checking |
+| `/microphone/record` | `tidybot_msgs/AudioRecord` | Start/stop audio recording |
 
 ## Example: Python Control Script
 
@@ -219,10 +294,14 @@ Create a file `my_robot_control.py`:
 
 ```python
 #!/usr/bin/env python3
+"""
+Example control script for TidyBot2.
+Uses sim-compatible topics — works unchanged in both simulation and real hardware.
+"""
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from tidybot_msgs.msg import ArmCommand
+from std_msgs.msg import Float64MultiArray
 
 class MyRobotController(Node):
     def __init__(self):
@@ -230,7 +309,8 @@ class MyRobotController(Node):
 
         # Publishers (same topics work in sim and real!)
         self.base_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.arm_pub = self.create_publisher(ArmCommand, '/right_arm/command', 10)
+        self.right_arm_pub = self.create_publisher(Float64MultiArray, '/right_arm/joint_cmd', 10)
+        self.right_gripper_pub = self.create_publisher(Float64MultiArray, '/right_gripper/cmd', 10)
 
         # Timer for control loop
         self.create_timer(0.1, self.control_loop)
@@ -241,11 +321,15 @@ class MyRobotController(Node):
         vel.linear.x = 0.1
         self.base_pub.publish(vel)
 
-        # Move arm to home position
-        arm_cmd = ArmCommand()
-        arm_cmd.joint_positions = [0.0, -0.5, 0.5, 0.0, 0.0]
-        arm_cmd.duration = 2.0
-        self.arm_pub.publish(arm_cmd)
+        # Move right arm (6 joints: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate)
+        arm_cmd = Float64MultiArray()
+        arm_cmd.data = [0.0, -0.5, 0.5, 0.0, 0.0, 0.0]
+        self.right_arm_pub.publish(arm_cmd)
+
+        # Open right gripper
+        gripper_cmd = Float64MultiArray()
+        gripper_cmd.data = [0.0]  # 0.0 = open, 1.0 = closed
+        self.right_gripper_pub.publish(gripper_cmd)
 
 def main():
     rclpy.init()
@@ -264,17 +348,63 @@ Run it:
 python3 my_robot_control.py
 ```
 
+You can also use `tidybot_msgs` for trajectory-interpolated arm commands:
+
+```python
+from tidybot_msgs.msg import ArmCommand
+
+# Publish to /right_arm/command for smooth interpolated motion
+arm_cmd = ArmCommand()
+arm_cmd.joint_positions = [0.0, -0.5, 0.5, 0.0, 0.0, 0.0]
+arm_cmd.duration = 2.0  # seconds to reach target (cosine easing)
+```
+
 ## Visualization with RViz
 
 Launch RViz on your client machine to visualize the robot:
 
 ```bash
-# Using the client launch file
+# Using the client launch file (includes local robot_state_publisher + RViz)
 ros2 launch tidybot_client client_rviz.launch.py
+
+# With a custom domain ID
+ros2 launch tidybot_client client_rviz.launch.py domain_id:=42
+
+# Or use the connect_robot launch (sets up env, optional TF)
+ros2 launch tidybot_client connect_robot.launch.py robot_ip:=192.168.0.207 start_tf:=true
 
 # Or manually
 rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.rviz
 ```
+
+## Hardware Details
+
+### Dual U2D2 Setup
+
+| U2D2 Port | Components | Motor IDs |
+|-----------|------------|-----------|
+| `/dev/ttyUSB_RIGHT` (U2D2 #1) | Right arm + pan-tilt | Arm: 1-9, Pan: 21, Tilt: 22 |
+| `/dev/ttyUSB_LEFT` (U2D2 #2) | Left arm | 11-19 |
+
+### Arm Joint Order (6-DOF WX250s)
+
+`[waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate]`
+
+### Nodes Launched by `real.launch.py`
+
+| Node | Package | Description |
+|------|---------|-------------|
+| `robot_state_publisher` | `robot_state_publisher` | URDF → TF transforms |
+| `joint_state_aggregator` | `joint_state_publisher` | Aggregates arm + pan-tilt joint states → `/joint_states` |
+| `phoenix6_base` | `tidybot_control` | Mobile base driver (CAN bus) |
+| `xs_sdk` (right_arm) | `interbotix_xs_sdk` | Right arm + pan-tilt Dynamixel driver |
+| `xs_sdk` (left_arm) | `interbotix_xs_sdk` | Left arm Dynamixel driver |
+| `arm_wrapper` | `tidybot_control` | Sim→real topic translation with velocity limiting |
+| `gripper_wrapper` | `tidybot_control` | Sim→real gripper translation (normalized → PWM) |
+| `realsense` | `realsense2_camera` | RealSense D435 camera driver |
+| `image_compression` | `tidybot_network_bridge` | JPEG/PNG compression (optional) |
+| `motion_planner` | `tidybot_ik` | Pinocchio-based IK solver (optional) |
+| `microphone` | `tidybot_control` | Audio recording service |
 
 ## Troubleshooting
 
@@ -282,12 +412,12 @@ rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.r
 
 1. **Check ROS_DOMAIN_ID matches:**
    ```bash
-   echo $ROS_DOMAIN_ID  # Should be same on robot and client
+   echo $ROS_DOMAIN_ID  # Should be 42 on both robot and client
    ```
 
 2. **Check RMW implementation matches:**
    ```bash
-   echo $RMW_IMPLEMENTATION  # Should be same on both
+   echo $RMW_IMPLEMENTATION  # Should be rmw_cyclonedds_cpp on both
    ```
 
 3. **Check network connectivity:**
@@ -305,25 +435,23 @@ rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.r
 
 ### Camera images not appearing / slow
 
-1. **Use compressed images:**
+1. **Enable compression on the robot:**
    ```bash
-   ros2 topic echo /camera/color/image_compressed
+   ros2 launch tidybot_bringup real.launch.py use_compression:=true
    ```
+   Then subscribe to `/camera/color/image_compressed` on the client.
 
 2. **Check bandwidth:**
-   - Raw images: ~30 MB/s
+   - Raw images (640x480 @ 15fps): ~14 MB/s
    - Compressed images: ~1-2 MB/s
 
-3. **Reduce resolution** in launch file parameters.
+3. **Camera resolution** is set to 640x480 @ 15fps by default in the launch file.
 
 ### High latency
 
 1. **Check WiFi signal strength**
 2. **Use Ethernet if possible**
-3. **Reduce camera frame rate:**
-   ```bash
-   ros2 launch tidybot_bringup robot.launch.py camera_fps:=15
-   ```
+3. **Enable image compression** with `use_compression:=true`
 
 ### "Failed to connect to arm"
 
@@ -334,11 +462,12 @@ rviz2 -d $(ros2 pkg prefix tidybot_bringup)/share/tidybot_bringup/rviz/tidybot.r
    # Or add to dialout group permanently
    sudo usermod -a -G dialout $USER
    ```
+3. **Check U2D2 symlinks** — the launch expects `/dev/ttyUSB_RIGHT` and `/dev/ttyUSB_LEFT`
 
 ## Environment Variables Summary
 
 ```bash
-# Add to ~/.bashrc on both robot and client
+# Both robot and client (set automatically by setup_env.bash on robot)
 
 # Required
 export ROS_DOMAIN_ID=42                           # Must match!
@@ -350,8 +479,9 @@ export CYCLONEDDS_URI=file:///path/to/config.xml
 # Optional (for FastDDS)
 export FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/config.xml
 
-# Robot only
+# Robot only (set by setup_env.bash)
 export TIDYBOT2_PATH=/home/locobot/tidybot2
+export TIDYBOT_REPO_ROOT=/home/locobot/collaborative-robotics-2026
 ```
 
 ## Security Notes
