@@ -41,6 +41,18 @@ class TestPlannerReal(Node):
     # Fingers-down with wrist rotated 90° around the approach axis:
     ORIENT_FINGERS_DOWN_ROT90 = (0.707107, 0.0, 0.707107, 0.0)
 
+    # Common orientations in base_link frame (quaternion wxyz)
+    #
+    # The ee x-axis is the gripper finger direction.
+    # For a top-down grasp the fingers must point straight down (-Z).
+    #
+    # Fingers-down grasp:
+    #   ee x -> base_link -Z  (fingers point down)
+    ORIENT_FINGERS_DOWN = (0.5, 0.5, 0.5, -0.5)  # (qw, qx, qy, qz)
+
+    # Fingers-down with wrist rotated 90° around the approach axis:
+    ORIENT_FINGERS_DOWN_ROT90 = (0.707107, 0.0, 0.707107, 0.0)
+
     def __init__(self):
         super().__init__('test_planner_real')
 
@@ -136,6 +148,13 @@ class TestPlannerReal(Node):
         else:
             ori_str = ' (position only)'
         self.get_logger().info(f'Planning {arm_name} arm to: {pos_str}{ori_str}')
+        pos_str = f'({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})'
+        if use_orientation:
+            ori_str = (f' orient=({pose.orientation.w:.3f}, {pose.orientation.x:.3f}, '
+                       f'{pose.orientation.y:.3f}, {pose.orientation.z:.3f})')
+        else:
+            ori_str = ' (position only)'
+        self.get_logger().info(f'Planning {arm_name} arm to: {pos_str}{ori_str}')
 
         result = self.call_service_sync(request)
         if result is None:
@@ -144,6 +163,10 @@ class TestPlannerReal(Node):
         if result.success:
             self.get_logger().info(f'  SUCCESS: {result.message}')
             self.get_logger().info(f'  Solution: {[f"{j:.3f}" for j in result.joint_positions]}')
+            if use_orientation:
+                self.get_logger().info(
+                    f'  Errors: pos={result.position_error:.4f}m, '
+                    f'ori={result.orientation_error:.4f}rad ({np.degrees(result.orientation_error):.1f}°)')
             if use_orientation:
                 self.get_logger().info(
                     f'  Errors: pos={result.position_error:.4f}m, '
@@ -172,6 +195,13 @@ class TestPlannerReal(Node):
         else:
             ori_str = ' (position only)'
         self.get_logger().info(f'Planning and executing {arm_name} arm to: {pos_str}{ori_str}')
+        pos_str = f'({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})'
+        if use_orientation:
+            ori_str = (f' orient=({pose.orientation.w:.3f}, {pose.orientation.x:.3f}, '
+                       f'{pose.orientation.y:.3f}, {pose.orientation.z:.3f})')
+        else:
+            ori_str = ' (position only)'
+        self.get_logger().info(f'Planning and executing {arm_name} arm to: {pos_str}{ori_str}')
 
         result = self.call_service_sync(request)
         if result is None:
@@ -179,6 +209,10 @@ class TestPlannerReal(Node):
 
         if result.success:
             self.get_logger().info(f'  SUCCESS: {result.message}')
+            if use_orientation:
+                self.get_logger().info(
+                    f'  Errors: pos={result.position_error:.4f}m, '
+                    f'ori={result.orientation_error:.4f}rad ({np.degrees(result.orientation_error):.1f}°)')
             if use_orientation:
                 self.get_logger().info(
                     f'  Errors: pos={result.position_error:.4f}m, '
@@ -255,16 +289,36 @@ class TestPlannerReal(Node):
         self.get_logger().info('=' * 50)
         self.get_logger().info('Part A: Position-only IK — PLAN ONLY (no execution)')
         self.get_logger().info('=' * 50)
+        """Run the test sequence.
+
+        Coordinate frame (base_link):
+          -Y is forward, +X is left, +Z is up.
+          Arm shoulders: right=(-0.15, -0.12, 0.45), left=(0.15, -0.12, 0.45)
+          Arms extend forward (-Y) from the shoulder mounts.
+          Reachable workspace: ~0.3-0.5m from shoulder.
+        """
+        qw_fd, qx_fd, qy_fd, qz_fd = self.ORIENT_FINGERS_DOWN
+        qw_fr, qx_fr, qy_fr, qz_fr = self.ORIENT_FINGERS_DOWN_ROT90
+
+        # ── Part A: Position-only planning (no execution) ────────────
+
+        self.get_logger().info('=' * 50)
+        self.get_logger().info('Part A: Position-only IK — PLAN ONLY (no execution)')
+        self.get_logger().info('=' * 50)
 
         # Test 1: Plan only right arm
+        # Test 1: Plan only right arm
         self.get_logger().info('-' * 40)
+        self.get_logger().info('Test 1: Right arm position-only — PLAN ONLY')
         self.get_logger().info('Test 1: Right arm position-only — PLAN ONLY')
         pose1 = self.create_pose(0.05, -0.35, 0.55)
         success1 = self.plan_only('right', pose1, use_orientation=False)
         time.sleep(1.0)
 
         # Test 2: Plan only left arm
+        # Test 2: Plan only left arm
         self.get_logger().info('-' * 40)
+        self.get_logger().info('Test 2: Left arm position-only — PLAN ONLY')
         self.get_logger().info('Test 2: Left arm position-only — PLAN ONLY')
         pose2 = self.create_pose(-0.05, -0.35, 0.55)
         success2 = self.plan_only('left', pose2, use_orientation=False)
@@ -284,7 +338,7 @@ class TestPlannerReal(Node):
         success3 = self.plan_only('right', pose3, use_orientation=True)
         time.sleep(1.0)
 
-        # # Test 4: Plan right arm fingers-down-rot90
+        # Test 4: Plan right arm fingers-down-rot90
         self.get_logger().info('-' * 40)
         self.get_logger().info('Test 4: Right arm fingers-down-rot90 — PLAN ONLY')
         pose4 = self.create_pose(-0.20, -0.30, 0.50, qw_fr, qx_fr, qy_fr, qz_fr)
@@ -299,7 +353,6 @@ class TestPlannerReal(Node):
         time.sleep(1.0)
 
         plan_ok = success1 and success2 and success3 and success4 and success5
-        # plan_ok = success1 and success2 and success3 and success5
         if not plan_ok:
             self.get_logger().error('Some planning tests failed — skipping execution tests')
         else:
@@ -308,8 +361,13 @@ class TestPlannerReal(Node):
 
             # ── Part C: Position-only execution ──────────────────────
 
+            self.get_logger().info('All planning tests passed!')
+
+            # ── Part C: Position-only execution ──────────────────────
+
             self.get_logger().info('')
             self.get_logger().info('=' * 50)
+            self.get_logger().info('Part C: Position-only IK — EXECUTE')
             self.get_logger().info('Part C: Position-only IK — EXECUTE')
             self.get_logger().info('The robot will move! Make sure the workspace is clear.')
             self.get_logger().info('=' * 50)
@@ -336,8 +394,40 @@ class TestPlannerReal(Node):
             self.get_logger().info('Part D: Orientation IK — EXECUTE')
             self.get_logger().info('Gripper fingers should point straight down.')
             self.get_logger().info('=' * 50)
+            input('\n  Press Enter to start execution (Ctrl+C to abort)...\n')
+
+            # Test 6: Execute right arm position-only
+            self.get_logger().info('-' * 40)
+            self.get_logger().info('Test 6: Right arm position-only — EXECUTE')
+            pose6 = self.create_pose(-0.10, -0.35, 0.55)
+            self.plan_and_execute('right', pose6, use_orientation=False, duration=3.0)
+            input('\n  Press Enter for next test...\n')
+
+            # Test 7: Execute left arm position-only
+            self.get_logger().info('-' * 40)
+            self.get_logger().info('Test 7: Left arm position-only — EXECUTE')
+            pose7 = self.create_pose(0.10, -0.35, 0.55)
+            self.plan_and_execute('left', pose7, use_orientation=False, duration=3.0)
+            input('\n  Press Enter for next test...\n')
+
+            # ── Part D: Orientation execution ────────────────────────
+
+            self.get_logger().info('')
+            self.get_logger().info('=' * 50)
+            self.get_logger().info('Part D: Orientation IK — EXECUTE')
+            self.get_logger().info('Gripper fingers should point straight down.')
+            self.get_logger().info('=' * 50)
+            input('\n  Press Enter to start orientation execution (Ctrl+C to abort)...\n')
             input('\n  Press Enter to start orientation execution (Ctrl+C to abort)...\n')
 
+            # Test 8: Right arm fingers-down
+            self.get_logger().info('-' * 40)
+            self.get_logger().info('Test 8: Right arm fingers-down — EXECUTE')
+            pose8 = self.create_pose(-0.10, -0.35, 0.55, qw_fd, qx_fd, qy_fd, qz_fd)
+            self.plan_and_execute('right', pose8, use_orientation=True, duration=3.0)
+            input('\n  Press Enter for next test...\n')
+
+            # Test 9: Right arm fingers-down lower position
             # Test 8: Right arm fingers-down
             self.get_logger().info('-' * 40)
             self.get_logger().info('Test 8: Right arm fingers-down — EXECUTE')
@@ -351,20 +441,36 @@ class TestPlannerReal(Node):
             pose9 = self.create_pose(-0.05, -0.35, 0.50, qw_fd, qx_fd, qy_fd, qz_fd)
             self.plan_and_execute('right', pose9, use_orientation=True, duration=3.0)
             input('\n  Press Enter for next test...\n')
+            self.get_logger().info('Test 9: Right arm fingers-down lower — EXECUTE')
+            pose9 = self.create_pose(-0.05, -0.35, 0.50, qw_fd, qx_fd, qy_fd, qz_fd)
+            self.plan_and_execute('right', pose9, use_orientation=True, duration=3.0)
+            input('\n  Press Enter for next test...\n')
 
+            # Test 10: Right arm fingers-down-rot90 (side reach)
             # Test 10: Right arm fingers-down-rot90 (side reach)
             self.get_logger().info('-' * 40)
             self.get_logger().info('Test 10: Right arm fingers-down-rot90 — EXECUTE')
             pose10 = self.create_pose(-0.20, -0.30, 0.50, qw_fr, qx_fr, qy_fr, qz_fr)
             self.plan_and_execute('right', pose10, use_orientation=True, duration=3.0)
             input('\n  Press Enter for next test...\n')
+            self.get_logger().info('Test 10: Right arm fingers-down-rot90 — EXECUTE')
+            pose10 = self.create_pose(-0.20, -0.30, 0.50, qw_fr, qx_fr, qy_fr, qz_fr)
+            self.plan_and_execute('right', pose10, use_orientation=True, duration=3.0)
+            input('\n  Press Enter for next test...\n')
 
+            # Test 11: Left arm fingers-down
             # Test 11: Left arm fingers-down
             self.get_logger().info('-' * 40)
             self.get_logger().info('Test 11: Left arm fingers-down — EXECUTE')
             pose11 = self.create_pose(0.10, -0.35, 0.55, qw_fd, qx_fd, qy_fd, qz_fd)
             self.plan_and_execute('left', pose11, use_orientation=True, duration=3.0)
             time.sleep(3.0)
+            self.get_logger().info('Test 11: Left arm fingers-down — EXECUTE')
+            pose11 = self.create_pose(0.10, -0.35, 0.55, qw_fd, qx_fd, qy_fd, qz_fd)
+            self.plan_and_execute('left', pose11, use_orientation=True, duration=3.0)
+            time.sleep(3.0)
+
+        # ── Return to sleep ──────────────────────────────────────────
 
         # ── Return to sleep ──────────────────────────────────────────
 
