@@ -228,8 +228,11 @@ class MotionPlannerRealNode(Node):
                 idx = self.model.joints[jid].idx_q
                 q[idx] = positions[i]
 
-    def numerical_jacobian(self, q: np.ndarray, arm_name: str, ee_frame_id: int, eps: float = 1e-4) -> np.ndarray:
-        """Compute numerical Jacobian for position (3x6 matrix).
+    def numerical_jacobian(self, q: np.ndarray, arm_name: str, ee_frame_id: int,
+                            use_orientation: bool = False, eps: float = 1e-4) -> np.ndarray:
+        """Compute numerical Jacobian.
+
+        Returns a 3×n (position only) or 6×n (position + orientation) matrix.
 
         Note: We use numerical Jacobian because Pinocchio's analytical Jacobian
         has issues with floating base models.
@@ -240,20 +243,24 @@ class MotionPlannerRealNode(Node):
                 jid = self.joint_ids[jname]
                 arm_idx_q.append(self.model.joints[jid].idx_q)
 
-        # Get current position
+        # Get current pose
         pin.forwardKinematics(self.model, self.data, q)
         pin.updateFramePlacements(self.model, self.data)
         pos0 = self.data.oMf[ee_frame_id].translation.copy()
+        R0 = self.data.oMf[ee_frame_id].rotation.copy() if use_orientation else None
 
-        # Compute numerical derivatives
-        J = np.zeros((3, len(arm_idx_q)))
+        rows = 6 if use_orientation else 3
+        J = np.zeros((rows, len(arm_idx_q)))
         for i, idx_q in enumerate(arm_idx_q):
             q_plus = q.copy()
             q_plus[idx_q] += eps
             pin.forwardKinematics(self.model, self.data, q_plus)
             pin.updateFramePlacements(self.model, self.data)
             pos_plus = self.data.oMf[ee_frame_id].translation.copy()
-            J[:, i] = (pos_plus - pos0) / eps
+            J[:3, i] = (pos_plus - pos0) / eps
+            if use_orientation:
+                R_plus = self.data.oMf[ee_frame_id].rotation.copy()
+                J[3:, i] = pin.log3(R0.T @ R_plus) / eps
 
         return J
 
@@ -309,38 +316,55 @@ class MotionPlannerRealNode(Node):
                 jid = self.joint_ids[jname]
                 arm_idx_q.append(self.model.joints[jid].idx_q)
 
-        # Target position
+        # Target position and rotation
         target_position = target_pose.translation
+        target_rotation = target_pose.rotation
 
         # Joint limits
         limits = list(self.JOINT_LIMITS.values())
 
-        # IK iteration using numerical Jacobian (position-only for now)
-        # Note: Orientation control can be added later with 6D Jacobian
+        # IK iteration using numerical Jacobian
+        # When use_orientation=True we use a 6D error (position + orientation)
         for iteration in range(self.ik_max_iterations):
             # Forward kinematics
             pin.forwardKinematics(self.model, self.data, q)
             pin.updateFramePlacements(self.model, self.data)
 
-            # Current position
-            current_position = self.data.oMf[ee_frame_id].translation
+            # Current pose
+            current_pose = self.data.oMf[ee_frame_id]
+            current_position = current_pose.translation
 
             # Position error
             pos_error_vec = target_position - current_position
             pos_error = np.linalg.norm(pos_error_vec)
 
-            # Check convergence (position only for now)
-            if pos_error < self.position_tolerance:
-                break
+            if use_orientation:
+                # Orientation error as axis-angle vector
+                ori_error_vec = pin.log3(target_rotation.T @ current_pose.rotation)
+                ori_error = np.linalg.norm(ori_error_vec)
 
-            # Compute numerical Jacobian (3x6 for position)
-            J = self.numerical_jacobian(q, arm_name, ee_frame_id)
+                # Convergence check (both position and orientation)
+                if pos_error < self.position_tolerance and ori_error < self.orientation_tolerance:
+                    break
+
+                # 6D error vector and 6×6 Jacobian
+                error_vec = np.concatenate([pos_error_vec, -ori_error_vec])
+                J = self.numerical_jacobian(q, arm_name, ee_frame_id, use_orientation=True)
+                dim = 6
+            else:
+                # Position-only convergence check
+                if pos_error < self.position_tolerance:
+                    break
+
+                error_vec = pos_error_vec
+                J = self.numerical_jacobian(q, arm_name, ee_frame_id, use_orientation=False)
+                dim = 3
 
             # Damped least squares
-            JJT = J @ J.T + self.ik_damping * np.eye(3)
+            JJT = J @ J.T + self.ik_damping * np.eye(dim)
 
             try:
-                v = J.T @ np.linalg.solve(JJT, pos_error_vec)
+                v = J.T @ np.linalg.solve(JJT, error_vec)
             except np.linalg.LinAlgError:
                 break
 
@@ -348,15 +372,6 @@ class MotionPlannerRealNode(Node):
             for i, idx_q in enumerate(arm_idx_q):
                 new_val = q[idx_q] + self.ik_dt * v[i]
                 q[idx_q] = np.clip(new_val, limits[i][0], limits[i][1])
-
-        # Compute final orientation error if requested
-        ori_error = 0.0
-        if use_orientation:
-            current_pose = self.data.oMf[ee_frame_id]
-            R_diff = target_pose.rotation.T @ current_pose.rotation
-            trace = np.trace(R_diff)
-            cos_angle = np.clip((trace - 1) / 2, -1, 1)
-            ori_error = np.arccos(cos_angle)
 
         # Extract final solution
         solution = self.get_arm_from_configuration(q, arm_name)
@@ -392,7 +407,11 @@ class MotionPlannerRealNode(Node):
         return success, solution, position_error, orientation_error
 
     def compute_jacobian_condition(self, arm_name: str, joint_positions: np.ndarray) -> float:
-        """Compute Jacobian condition number at given configuration."""
+        """Compute Jacobian condition number at given configuration.
+
+        Uses the full 6×6 Jacobian (position + orientation) for a 6-DOF arm,
+        which gives a square matrix and a more meaningful condition number.
+        """
         q = pin.neutral(self.model)
         self.set_arm_configuration(q, arm_name, joint_positions)
 
@@ -400,8 +419,8 @@ class MotionPlannerRealNode(Node):
         if ee_frame_id is None:
             return float('inf')
 
-        # Compute numerical Jacobian (3x6 for position)
-        J = self.numerical_jacobian(q, arm_name, ee_frame_id)
+        # Use full 6×6 Jacobian for 6-DOF arm (square → well-defined cond number)
+        J = self.numerical_jacobian(q, arm_name, ee_frame_id, use_orientation=True)
 
         try:
             cond = np.linalg.cond(J)
@@ -447,7 +466,8 @@ class MotionPlannerRealNode(Node):
             response.message = f"Invalid arm_name '{request.arm_name}'. Use 'right' or 'left'."
             return response
 
-        self.get_logger().info(f'Planning for {arm_name} arm...')
+        mode = 'pos+orient' if request.use_orientation else 'pos-only'
+        self.get_logger().info(f'Planning for {arm_name} arm ({mode})...')
 
         # Get current joint positions as seed
         seed = self.get_arm_joint_positions(arm_name)
@@ -497,7 +517,11 @@ class MotionPlannerRealNode(Node):
 
         # Planning succeeded
         response.success = True
-        response.message = f"Planning succeeded: pos_err={pos_error:.4f}m, cond={condition_number:.1f}, min_dist={min_dist:.3f}m"
+        if request.use_orientation:
+            response.message = (f"Planning succeeded: pos_err={pos_error:.4f}m, "
+                               f"ori_err={ori_error:.4f}rad, cond={condition_number:.1f}, min_dist={min_dist:.3f}m")
+        else:
+            response.message = f"Planning succeeded: pos_err={pos_error:.4f}m, cond={condition_number:.1f}, min_dist={min_dist:.3f}m"
         self.get_logger().info(response.message)
 
         # Execute if requested
