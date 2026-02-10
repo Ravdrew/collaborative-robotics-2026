@@ -360,7 +360,7 @@ sudo tailscale up
 
 **On Your Client Machine:**
 
-For **Linux**:
+For **Linux** or**Windows WSL**:
 ```bash
 # Install Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
