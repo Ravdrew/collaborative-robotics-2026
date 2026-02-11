@@ -284,7 +284,7 @@ class TestPlannerReal(Node):
         success3 = self.plan_only('right', pose3, use_orientation=True)
         time.sleep(1.0)
 
-        # Test 4: Plan right arm fingers-down-rot90
+        # # Test 4: Plan right arm fingers-down-rot90
         self.get_logger().info('-' * 40)
         self.get_logger().info('Test 4: Right arm fingers-down-rot90 — PLAN ONLY')
         pose4 = self.create_pose(-0.20, -0.30, 0.50, qw_fr, qx_fr, qy_fr, qz_fr)
@@ -299,6 +299,7 @@ class TestPlannerReal(Node):
         time.sleep(1.0)
 
         plan_ok = success1 and success2 and success3 and success4 and success5
+        # plan_ok = success1 and success2 and success3 and success5
         if not plan_ok:
             self.get_logger().error('Some planning tests failed — skipping execution tests')
         else:

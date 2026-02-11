@@ -56,6 +56,18 @@ class MotionPlannerRealNode(Node):
     # [waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate]
     DEFAULT_SEED = np.array([0.0, -1.0, 0.8, 0.0, 0.5, 0.0])
 
+    # Additional seed configurations for multi-seed IK.
+    # These cover different arm poses to help the local IK solver
+    # converge from various regions of the configuration space.
+    EXTRA_SEEDS = [
+        np.array([0.0, -0.3, 0.7, 0.0, -1.0, 0.0]),       # Fingers-down-ish
+        np.array([0.0, -0.3, 0.7, np.pi, -1.0, 0.0]),      # Fingers-down, forearm rotated 180°
+        np.array([0.0, -0.3, 0.7, np.pi/2, -1.0, 0.0]),    # Fingers-down, forearm rotated 90°
+        np.array([0.0, -0.3, 0.7, -np.pi/2, -1.0, 0.0]),   # Fingers-down, forearm rotated -90°
+        np.array([0.0, -0.8, 1.0, 0.0, 0.3, 0.0]),         # Arm more extended
+        np.array([0.0, -0.5, 0.5, 0.0, 0.0, 0.0]),         # Mid-range compact
+    ]
+
     def __init__(self):
         super().__init__('motion_planner_real')
 
@@ -67,6 +79,7 @@ class MotionPlannerRealNode(Node):
         self.declare_parameter('orientation_tolerance', 0.1)  # ~6 deg
         self.declare_parameter('min_collision_distance', 0.05)  # 5cm
         self.declare_parameter('ik_damping', 1e-5)  # Less damping for better convergence
+        self.declare_parameter('max_ik_seeds', 7)  # Max number of IK seeds to try
 
         # Get parameters
         urdf_path_param = self.get_parameter('urdf_path').get_parameter_value().string_value
@@ -76,6 +89,7 @@ class MotionPlannerRealNode(Node):
         self.orientation_tolerance = self.get_parameter('orientation_tolerance').get_parameter_value().double_value
         self.min_collision_distance = self.get_parameter('min_collision_distance').get_parameter_value().double_value
         self.ik_damping = self.get_parameter('ik_damping').get_parameter_value().double_value
+        self.max_ik_seeds = self.get_parameter('max_ik_seeds').get_parameter_value().integer_value
 
         # Find URDF path
         if urdf_path_param:
@@ -469,26 +483,64 @@ class MotionPlannerRealNode(Node):
         mode = 'pos+orient' if request.use_orientation else 'pos-only'
         self.get_logger().info(f'Planning for {arm_name} arm ({mode})...')
 
-        # Get current joint positions as seed
-        seed = self.get_arm_joint_positions(arm_name)
+        # Get current joint positions as primary seed
+        primary_seed = self.get_arm_joint_positions(arm_name)
         other_arm = 'left' if arm_name == 'right' else 'right'
         other_arm_positions = self.get_arm_joint_positions(other_arm)
 
         # Convert target pose to SE3
         target_se3 = self.pose_to_se3(request.target_pose)
 
-        # Solve IK
-        ik_success, solution, pos_error, ori_error = self.solve_ik(
-            arm_name, target_se3, request.use_orientation, seed
-        )
+        # Build seed list: current position first, then extra seeds.
+        # For the left arm, mirror the waist and forearm_roll signs.
+        seeds = [primary_seed]
+        for extra in self.EXTRA_SEEDS:
+            if arm_name == 'left':
+                mirrored = extra.copy()
+                mirrored[0] = -mirrored[0]   # waist
+                mirrored[3] = -mirrored[3]   # forearm_roll
+                seeds.append(mirrored)
+            else:
+                seeds.append(extra.copy())
+
+        # Cap the number of seeds to try
+        seeds = seeds[:self.max_ik_seeds]
+
+        # Try IK with each seed, keep the best successful result
+        best_result = None  # (solution, pos_error, ori_error)
+        seeds_tried = 0
+        for seed in seeds:
+            seeds_tried += 1
+            ik_success, solution, pos_error, ori_error = self.solve_ik(
+                arm_name, target_se3, request.use_orientation, seed
+            )
+            if ik_success:
+                # Prefer solutions with lower total error
+                total_err = pos_error + ori_error
+                if best_result is None or total_err < (best_result[1] + best_result[2]):
+                    best_result = (solution, pos_error, ori_error)
+                # Early exit if solution is already very good
+                if pos_error < self.position_tolerance * 0.5 and \
+                   (not request.use_orientation or ori_error < self.orientation_tolerance * 0.5):
+                    break
+
+        if best_result is not None:
+            solution, pos_error, ori_error = best_result
+            self.get_logger().info(f'IK solved after {seeds_tried}/{len(seeds)} seed(s)')
+        else:
+            # All seeds failed — report the result from the primary seed
+            _, solution, pos_error, ori_error = self.solve_ik(
+                arm_name, target_se3, request.use_orientation, primary_seed
+            )
 
         response.position_error = pos_error
         response.orientation_error = ori_error
         response.joint_positions = solution.tolist()
 
-        if not ik_success:
+        if best_result is None:
             response.success = False
-            response.message = f"IK failed: position error={pos_error:.4f}m, orientation error={ori_error:.4f}rad"
+            response.message = (f"IK failed after {len(seeds)} seeds: "
+                                f"position error={pos_error:.4f}m, orientation error={ori_error:.4f}rad")
             self.get_logger().warn(response.message)
             return response
 
