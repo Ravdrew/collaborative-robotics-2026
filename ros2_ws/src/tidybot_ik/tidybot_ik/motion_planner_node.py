@@ -63,7 +63,8 @@ class MotionPlannerNode(Node):
         self.declare_parameter('ik_max_iterations', 500)
         self.declare_parameter('position_tolerance', 0.01)  # 1cm
         self.declare_parameter('orientation_tolerance', 0.1)  # ~6 deg
-        self.declare_parameter('min_collision_distance', 0.05)  # 5cm
+        self.declare_parameter('min_collision_distance', 0.03)  # 3cm
+        self.declare_parameter('trajectory_check_rate_hz', 50.0)  # Match arm_controller control_rate
 
         # Get parameters
         model_path_param = self.get_parameter('model_path').get_parameter_value().string_value
@@ -72,6 +73,9 @@ class MotionPlannerNode(Node):
         self.position_tolerance = self.get_parameter('position_tolerance').get_parameter_value().double_value
         self.orientation_tolerance = self.get_parameter('orientation_tolerance').get_parameter_value().double_value
         self.min_collision_distance = self.get_parameter('min_collision_distance').get_parameter_value().double_value
+        self.trajectory_check_rate_hz = self.get_parameter(
+            'trajectory_check_rate_hz'
+        ).get_parameter_value().double_value
 
         # Find model path
         if model_path_param:
@@ -147,8 +151,20 @@ class MotionPlannerNode(Node):
 
         # Bodies for collision checking
         self.collision_bodies = {
-            'right': ['right_upper_arm_link', 'right_forearm_link', 'right_wrist_link', 'right_gripper_link'],
-            'left': ['left_upper_arm_link', 'left_forearm_link', 'left_wrist_link', 'left_gripper_link'],
+            'right': [
+                'right_upper_arm_link',
+                'right_upper_forearm_link',
+                'right_lower_forearm_link',
+                'right_wrist_link',
+                'right_gripper_link',
+            ],
+            'left': [
+                'left_upper_arm_link',
+                'left_upper_forearm_link',
+                'left_lower_forearm_link',
+                'left_wrist_link',
+                'left_gripper_link',
+            ],
         }
 
         # Get body IDs
@@ -158,6 +174,12 @@ class MotionPlannerNode(Node):
             for bname in self.collision_bodies[arm]:
                 bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, bname)
                 self.body_ids[arm].append(bid)
+
+        # Base body IDs for arm-base collision checks
+        self.base_body_ids = []
+        base_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'base_link')
+        if base_bid >= 0:
+            self.base_body_ids.append(base_bid)
 
         # Current joint states
         self.current_joint_positions = {}
@@ -446,9 +468,11 @@ class MotionPlannerNode(Node):
 
         mujoco.mj_forward(self.model, self.data)
 
-        # Check MuJoCo contacts for inter-arm collisions
+        # Check MuJoCo contacts for inter-arm and arm-base collisions
         right_body_set = set(self.body_ids['right'])
         left_body_set = set(self.body_ids['left'])
+        base_body_set = set(self.base_body_ids)
+        arm_body_set = right_body_set | left_body_set
         min_distance = float('inf')
 
         for i in range(self.data.ncon):
@@ -459,7 +483,9 @@ class MotionPlannerNode(Node):
             # Check if contact is between a right arm geom and a left arm geom
             is_inter_arm = ((body1 in right_body_set and body2 in left_body_set) or
                            (body1 in left_body_set and body2 in right_body_set))
-            if is_inter_arm:
+            is_arm_base = ((body1 in arm_body_set and body2 in base_body_set) or
+                           (body2 in arm_body_set and body1 in base_body_set))
+            if is_inter_arm or is_arm_base:
                 # contact.dist < 0 means penetration
                 min_distance = min(min_distance, contact.dist)
 
@@ -467,8 +493,55 @@ class MotionPlannerNode(Node):
         if min_distance == float('inf'):
             min_distance = 1.0  # No contacts = safe
 
-        collision_free = min_distance >= -self.min_collision_distance
+        collision_free = min_distance >= self.min_collision_distance
         return collision_free, min_distance
+
+    def _generate_trajectory_samples(self, start: np.ndarray, target: np.ndarray,
+                                     duration: float) -> list[np.ndarray]:
+        """Generate samples matching arm_controller_node interpolation timing/profile."""
+        if duration <= 0.0:
+            return [target.copy()]
+
+        # arm_controller_node updates at fixed control rate and uses cosine easing.
+        rate_hz = max(self.trajectory_check_rate_hz, 1.0)
+        dt = 1.0 / rate_hz
+        trajectory_time = 0.0
+        max_steps = int(np.ceil(duration * rate_hz)) + 2
+        samples = []
+
+        for _ in range(max_steps):
+            trajectory_time += dt
+            if trajectory_time >= duration:
+                samples.append(target.copy())
+                break
+
+            t = trajectory_time / duration
+            alpha = 0.5 * (1 - np.cos(np.pi * t))
+            samples.append(start + alpha * (target - start))
+
+        if not samples:
+            samples.append(target.copy())
+
+        return samples
+
+    def check_trajectory_collision(self, arm_name: str, start: np.ndarray,
+                                   target: np.ndarray, other_arm_positions: np.ndarray,
+                                   duration: float) -> tuple:
+        """Check collision along the full interpolated trajectory."""
+        samples = self._generate_trajectory_samples(start, target, duration)
+        min_distance = float('inf')
+
+        for idx, q in enumerate(samples):
+            if arm_name == 'right':
+                collision_free, dist = self.check_arm_collision(q, other_arm_positions)
+            else:
+                collision_free, dist = self.check_arm_collision(other_arm_positions, q)
+
+            min_distance = min(min_distance, dist)
+            if not collision_free:
+                return False, min_distance, idx + 1, len(samples)
+
+        return True, min_distance, 0, len(samples)
 
     def plan_to_target_callback(self, request, response):
         """Handle PlanToTarget service request."""
@@ -486,7 +559,7 @@ class MotionPlannerNode(Node):
         # Get current joint positions as seed
         seed = self.get_arm_joint_positions(arm_name)
         other_arm = 'left' if arm_name == 'right' else 'right'
-        other_arm_positions = self.get_arm_joint_positions(other_arm)
+        other_arm_positions = self.get_arm_joint_positions(other_arm, use_default_if_zero=False)
 
         # Convert target pose to SE3
         target_se3 = self.pose_to_se3(request.target_pose, request.use_orientation)
@@ -528,12 +601,27 @@ class MotionPlannerNode(Node):
             self.get_logger().warn(response.message)
             return response
 
+        # Check interpolated trajectory collision (matches arm_controller interpolation)
+        start_positions = self.get_arm_joint_positions(arm_name, use_default_if_zero=False)
+        traj_free, traj_min_dist, fail_step, total_steps = self.check_trajectory_collision(
+            arm_name, start_positions, solution, other_arm_positions, request.duration
+        )
+        if not traj_free:
+            response.success = False
+            response.message = (
+                f"Trajectory collision detected at step {fail_step}/{total_steps}: "
+                f"min distance={traj_min_dist:.3f}m < {self.min_collision_distance}m"
+            )
+            self.get_logger().warn(response.message)
+            return response
+
         # Planning succeeded
         response.success = True
         msg = f"Planning succeeded: pos_err={pos_error:.4f}m"
         if request.use_orientation:
             msg += f", ori_err={ori_error:.4f}rad"
-        msg += f", cond={condition_number:.1f}, min_dist={min_dist:.3f}m"
+        msg += (f", cond={condition_number:.1f}, end_min_dist={min_dist:.3f}m, "
+                f"traj_min_dist={traj_min_dist:.3f}m")
         response.message = msg
         self.get_logger().info(response.message)
 
