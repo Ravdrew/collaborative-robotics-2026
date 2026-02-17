@@ -77,7 +77,7 @@ class MotionPlannerRealNode(Node):
         self.declare_parameter('ik_max_iterations', 200)  # More iterations
         self.declare_parameter('position_tolerance', 0.03)  # 3cm
         self.declare_parameter('orientation_tolerance', 0.1)  # ~6 deg
-        self.declare_parameter('min_collision_distance', 0.05)  # 5cm
+        self.declare_parameter('min_collision_distance', 0.03)  # 3cm
         self.declare_parameter('ik_damping', 1e-5)  # Less damping for better convergence
         self.declare_parameter('max_ik_seeds', 7)  # Max number of IK seeds to try
 
@@ -155,6 +155,7 @@ class MotionPlannerRealNode(Node):
             'left': ['left_upper_arm_link', 'left_upper_forearm_link',
                      'left_lower_forearm_link', 'left_wrist_link', 'left_gripper_link'],
         }
+        self.base_collision_frames = ['base_link', 'right_arm_base_link', 'left_arm_base_link']
 
         # Get collision frame IDs
         self.collision_frame_ids = {}
@@ -163,6 +164,11 @@ class MotionPlannerRealNode(Node):
             for fname in self.collision_frames[arm]:
                 if self.model.existFrame(fname):
                     self.collision_frame_ids[arm].append(self.model.getFrameId(fname))
+
+        self.base_collision_frame_ids = []
+        for fname in self.base_collision_frames:
+            if self.model.existFrame(fname):
+                self.base_collision_frame_ids.append(self.model.getFrameId(fname))
 
         # Current joint states
         self.current_joint_positions = {}
@@ -458,6 +464,7 @@ class MotionPlannerRealNode(Node):
         pin.updateFramePlacements(self.model, self.data)
 
         # Get positions of collision frames and check pairwise distances
+        # for both arm-arm and arm-base proximity.
         min_distance = float('inf')
 
         for right_fid in self.collision_frame_ids['right']:
@@ -466,6 +473,14 @@ class MotionPlannerRealNode(Node):
                 left_pos = self.data.oMf[left_fid].translation
                 dist = np.linalg.norm(right_pos - left_pos)
                 min_distance = min(min_distance, dist)
+
+        for arm in ['right', 'left']:
+            for arm_fid in self.collision_frame_ids[arm]:
+                arm_pos = self.data.oMf[arm_fid].translation
+                for base_fid in self.base_collision_frame_ids:
+                    base_pos = self.data.oMf[base_fid].translation
+                    dist = np.linalg.norm(arm_pos - base_pos)
+                    min_distance = min(min_distance, dist)
 
         collision_free = min_distance >= self.min_collision_distance
         return collision_free, min_distance
