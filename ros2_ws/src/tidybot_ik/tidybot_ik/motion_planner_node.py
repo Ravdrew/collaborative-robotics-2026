@@ -610,9 +610,11 @@ class MotionPlannerNode(Node):
 
         mujoco.mj_forward(self.model, self.data)
 
-        # Check MuJoCo contacts for inter-arm collisions
+        # Check MuJoCo contacts for inter-arm and arm-base collisions
         right_body_set = set(self.body_ids['right'])
         left_body_set = set(self.body_ids['left'])
+        base_body_set = set(self.base_body_ids)
+        arm_body_set = right_body_set | left_body_set
         min_distance = float('inf')
 
         for i in range(self.data.ncon):
@@ -623,7 +625,9 @@ class MotionPlannerNode(Node):
             # Check if contact is between a right arm geom and a left arm geom
             is_inter_arm = ((body1 in right_body_set and body2 in left_body_set) or
                            (body1 in left_body_set and body2 in right_body_set))
-            if is_inter_arm:
+            is_arm_base = ((body1 in arm_body_set and body2 in base_body_set) or
+                           (body2 in arm_body_set and body1 in base_body_set))
+            if is_inter_arm or is_arm_base:
                 # contact.dist < 0 means penetration
                 min_distance = min(min_distance, contact.dist)
 
@@ -631,7 +635,7 @@ class MotionPlannerNode(Node):
         if min_distance == float('inf'):
             min_distance = 1.0  # No contacts = safe
 
-        collision_free = min_distance >= -self.min_collision_distance
+        collision_free = min_distance >= self.min_collision_distance
         return collision_free, min_distance
 
     def _generate_trajectory_samples(self, start: np.ndarray, target: np.ndarray,
@@ -760,7 +764,8 @@ class MotionPlannerNode(Node):
         msg = f"Planning succeeded: pos_err={pos_error:.4f}m"
         if request.use_orientation:
             msg += f", ori_err={ori_error:.4f}rad"
-        msg += f", cond={condition_number:.1f}, min_dist={min_dist:.3f}m"
+        msg += (f", cond={condition_number:.1f}, end_min_dist={min_dist:.3f}m, "
+                f"traj_min_dist={traj_min_dist:.3f}m")
         response.message = msg
         self.get_logger().info(response.message)
 
