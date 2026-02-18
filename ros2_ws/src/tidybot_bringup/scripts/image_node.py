@@ -4,7 +4,7 @@ TidyBot2 Image Processing Node
 
 Subscribes to /pick_target and /place_target from audio_processing_node,
 uses the RealSense D435 camera (RGB + Depth) to detect and localize objects
-via OpenAI GPT-4o vision, and publishes the 3-D position.
+via YOLOv8 (ultralytics), and publishes the 3-D position.
 
 Performs RGB-Depth alignment using camera intrinsics/extrinsics (the D435
 has separate RGB and depth sensors with a physical baseline).
@@ -29,14 +29,8 @@ Usage:
     ros2 launch tidybot_bringup sim.launch.py use_rviz:=false
 
     # Terminal 2
-    export OPENAI_API_KEY="sk-..."
     ros2 run tidybot_bringup image_node.py
 """
-
-import base64
-import json
-import os
-import threading
 
 import cv2
 import numpy as np
@@ -51,37 +45,28 @@ from geometry_msgs.msg import PointStamped
 
 from cv_bridge import CvBridge
 
-# OpenAI
-from openai import OpenAI
+# YOLOv8
+from ultralytics import YOLO
 
 
 # -- Valid targets -----------------------------------------------------------
 VALID_PICK_TARGETS = {"apple", "banana"}
 VALID_PLACE_TARGETS = {"none", "basket", "hand"}
 
-# GPT-4o prompt that asks for a bounding box
-DETECTION_PROMPT = """You are an object-detection assistant for a robot.
-
-Given the camera image, find the object named "{target}".
-
-Return ONLY a JSON object (no markdown, no extra text) with these fields:
-{{
-  "found": true or false,
-  "bbox": [x_min, y_min, x_max, y_max],
-  "confidence": 0.0 to 1.0
-}}
-
-Where bbox pixel coordinates are integers relative to the image
-(top-left origin, x -> right, y -> down).
-Image resolution is {width}x{height}.
-
-If the object is not visible, return {{"found": false, "bbox": [0,0,0,0], "confidence": 0.0}}.
-"""
+# Mapping from our target names -> COCO class names that YOLO recognises.
+# YOLO COCO classes: 'apple' (id 47), 'banana' (id 46), 'bottle' (id 39),
+# 'person' (id 0), 'bowl' (id 45) — we use 'person' for hand detection.
+TARGET_TO_YOLO_CLASS = {
+    "apple":  "apple",
+    "banana": "banana",
+    "basket": "bowl",       # closest COCO class
+    "hand":   "person",    # detect person, then the hand is near them
+}
 
 
 # ===========================================================================
 class ImageNode(Node):
-    """RealSense-based image processing with RGB-Depth alignment + GPT-4o."""
+    """RealSense-based image processing with RGB-Depth alignment + YOLOv8."""
 
     def __init__(self):
         super().__init__("image_node")
@@ -93,9 +78,9 @@ class ImageNode(Node):
         self.declare_parameter("depth_topic", "/camera/depth/image_raw")
         self.declare_parameter("rgb_info_topic", "/camera/color/camera_info")
         self.declare_parameter("depth_info_topic", "/camera/depth/camera_info")
-        self.declare_parameter("detection_rate", 1.0)        # Hz - API calls
-        self.declare_parameter("openai_model", "gpt-4o")
-        self.declare_parameter("openai_api_key", "")         # fallback; prefer env var
+        self.declare_parameter("detection_rate", 5.0)        # Hz - YOLO is local, can be fast
+        self.declare_parameter("yolo_model", "yolov8n.pt")   # nano model for speed
+        self.declare_parameter("yolo_conf", 0.4)              # confidence threshold
 
         pick_topic = self.get_parameter("pick_topic").value
         place_topic = self.get_parameter("place_topic").value
@@ -104,18 +89,13 @@ class ImageNode(Node):
         rgb_info_topic = self.get_parameter("rgb_info_topic").value
         depth_info_topic = self.get_parameter("depth_info_topic").value
         detection_rate = self.get_parameter("detection_rate").value
-        self.openai_model = self.get_parameter("openai_model").value
+        yolo_model_name = self.get_parameter("yolo_model").value
+        self.yolo_conf = self.get_parameter("yolo_conf").value
 
-        # OpenAI client - env var takes precedence
-        api_key = (
-            os.environ.get("OPENAI_API_KEY")
-            or self.get_parameter("openai_api_key").value
-        )
-        if not api_key:
-            self.get_logger().error(
-                "No OPENAI_API_KEY found. Set the env var or pass openai_api_key param."
-            )
-        self.openai_client = OpenAI(api_key=api_key)
+        # Load YOLO model (downloads weights on first run)
+        self.get_logger().info(f"Loading YOLO model: {yolo_model_name} ...")
+        self.yolo_model = YOLO(yolo_model_name)
+        self.get_logger().info("YOLO model loaded.")
 
         # -- Internal state ----------------------------------------------------
         self.cv_bridge = CvBridge()
@@ -124,12 +104,7 @@ class ImageNode(Node):
         self.latest_rgb = None    # np.ndarray | None
         self.latest_depth = None  # np.ndarray | None
 
-        # Last detection caches (reused between API calls)
-        self._last_pick_detection = None   # {found, bbox, confidence, target}
-        self._last_place_detection = None  # {found, bbox, confidence, target}
-        self._api_lock = threading.Lock()
-        self._pick_api_busy = False
-        self._place_api_busy = False
+        # Detection results are computed synchronously each loop (YOLO is fast)
 
         # Camera intrinsics - populated from CameraInfo messages
         self.rgb_intrinsics = None   # dict | None
@@ -175,13 +150,14 @@ class ImageNode(Node):
         self.timer = self.create_timer(1.0 / detection_rate, self._detection_loop)
 
         self.get_logger().info("=" * 55)
-        self.get_logger().info("  TidyBot2 Image Processing Node (GPT-4o)")
+        self.get_logger().info("  TidyBot2 Image Processing Node (YOLOv8)")
         self.get_logger().info("=" * 55)
         self.get_logger().info(f"  RGB topic  : {rgb_topic}")
         self.get_logger().info(f"  Depth topic: {depth_topic}")
         self.get_logger().info(f"  Pick topic : {pick_topic}")
         self.get_logger().info(f"  Place topic: {place_topic}")
-        self.get_logger().info(f"  Model      : {self.openai_model}")
+        self.get_logger().info(f"  YOLO model : {yolo_model_name}")
+        self.get_logger().info(f"  Confidence : {self.yolo_conf}")
         self.get_logger().info(f"  Rate       : {detection_rate} Hz")
         self.get_logger().info("  Valid picks : apple, banana")
         self.get_logger().info("  Valid places: none, basket, hand")
@@ -198,7 +174,6 @@ class ImageNode(Node):
             )
             return
         self.pick_target = target
-        self._last_pick_detection = None  # force a fresh detection
         self.get_logger().info(f"Pick target set -> '{target}'")
 
     def _cb_place(self, msg):
@@ -210,7 +185,6 @@ class ImageNode(Node):
             )
             return
         self.place_target = target
-        self._last_place_detection = None  # force a fresh detection
         self.get_logger().info(f"Place target set -> '{target}'")
 
     def _cb_rgb(self, msg):
@@ -398,93 +372,47 @@ class ImageNode(Node):
 
         return aligned
 
-    # ================= GPT-4o OBJECT DETECTION =============================
+    # ================= YOLOv8 OBJECT DETECTION =============================
 
-    def _encode_image_base64(self, rgb_image):
-        """Encode an RGB numpy image as a base64 JPEG string for the API."""
-        bgr = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
-        _, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        return base64.b64encode(buf.tobytes()).decode("utf-8")
-
-    def _call_gpt4o_detection(self, rgb_image, target_name):
-        """Send the image to GPT-4o and ask it to locate target_name.
-
-        Returns dict with keys: found (bool), bbox [x1,y1,x2,y2], confidence.
-        Returns None on API error.
-        """
-        h, w = rgb_image.shape[:2]
-        prompt = DETECTION_PROMPT.format(target=target_name, width=w, height=h)
-        b64 = self._encode_image_base64(rgb_image)
-
-        try:
-            response = self.openai_client.chat.completions.create(
-                model=self.openai_model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{b64}",
-                                    "detail": "low",  # cheaper / faster
-                                },
-                            },
-                        ],
-                    }
-                ],
-                max_tokens=200,
-                temperature=0.0,
-            )
-
-            raw = response.choices[0].message.content.strip()
-            # Strip markdown code fences if the model wraps them
-            if raw.startswith("```"):
-                raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
-            result = json.loads(raw)
-            result.setdefault("found", False)
-            result.setdefault("bbox", [0, 0, 0, 0])
-            result.setdefault("confidence", 0.0)
-            result["target"] = target_name
-            return result
-
-        except Exception as e:
-            self.get_logger().error(f"GPT-4o API call failed: {e}")
-            return None
-
-    def _threaded_detect(self, rgb_image, target_name, detection_type):
-        """Run GPT-4o detection in a background thread so we don't block.
+    def _detect_target(self, rgb_image, target_name):
+        """Run YOLOv8 on the image and find the best detection for target_name.
 
         Args:
-            detection_type: 'pick' or 'place'
+            rgb_image:   (H, W, 3) uint8 RGB image.
+            target_name: one of the keys in TARGET_TO_YOLO_CLASS.
+
+        Returns:
+            dict with {found, bbox [x1,y1,x2,y2], confidence} or None.
         """
-        try:
-            result = self._call_gpt4o_detection(rgb_image, target_name)
-            if result is not None:
-                if detection_type == "pick":
-                    self._last_pick_detection = result
-                else:
-                    self._last_place_detection = result
-                if result["found"]:
-                    bbox = result["bbox"]
-                    self.get_logger().info(
-                        f"GPT-4o found {detection_type} '{target_name}' "
-                        f"bbox={bbox} conf={result['confidence']:.2f}"
-                    )
-                else:
-                    self.get_logger().info(
-                        f"GPT-4o: {detection_type} '{target_name}' not found"
-                    )
-        except Exception as e:
-            self.get_logger().error(f"Detection thread error: {e}")
-        finally:
-            with self._api_lock:
-                if detection_type == "pick":
-                    self._pick_api_busy = False
-                else:
-                    self._place_api_busy = False
+        yolo_class = TARGET_TO_YOLO_CLASS.get(target_name)
+        if yolo_class is None:
+            return {"found": False, "bbox": [0, 0, 0, 0], "confidence": 0.0}
+
+        # YOLO expects BGR
+        bgr = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+        results = self.yolo_model(bgr, conf=self.yolo_conf, verbose=False)
+
+        best_box = None
+        best_conf = 0.0
+
+        for r in results:
+            for box in r.boxes:
+                cls_id = int(box.cls[0])
+                cls_name = self.yolo_model.names[cls_id]
+                conf = float(box.conf[0])
+
+                if cls_name == yolo_class and conf > best_conf:
+                    best_conf = conf
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    best_box = [int(x1), int(y1), int(x2), int(y2)]
+
+        if best_box is not None:
+            return {
+                "found": True,
+                "bbox": best_box,
+                "confidence": best_conf,
+            }
+        return {"found": False, "bbox": [0, 0, 0, 0], "confidence": 0.0}
 
     # ==================== 3-D POSITION =====================================
 
@@ -517,7 +445,7 @@ class ImageNode(Node):
     # ==================== MAIN DETECTION LOOP ==============================
 
     def _detection_loop(self):
-        """Periodic loop: align -> detect (GPT-4o) -> localise -> publish."""
+        """Periodic loop: align -> detect (YOLO) -> localise -> publish."""
         if self.latest_rgb is None or self.latest_depth is None:
             return
         if self.pick_target is None:
@@ -529,30 +457,9 @@ class ImageNode(Node):
         rgb = self.latest_rgb.copy()
         now = self.get_clock().now().to_msg()
 
-        # 2. Kick off GPT-4o detection for pick target (non-blocking) ----------
-        with self._api_lock:
-            if not self._pick_api_busy:
-                self._pick_api_busy = True
-                threading.Thread(
-                    target=self._threaded_detect,
-                    args=(rgb.copy(), self.pick_target, "pick"),
-                    daemon=True,
-                ).start()
-
-        # 3. Kick off GPT-4o detection for place target (non-blocking) ---------
-        if self.place_target and self.place_target != "none":
-            with self._api_lock:
-                if not self._place_api_busy:
-                    self._place_api_busy = True
-                    threading.Thread(
-                        target=self._threaded_detect,
-                        args=(rgb.copy(), self.place_target, "place"),
-                        daemon=True,
-                    ).start()
-
-        # 4. Publish /pick_target_global from cached pick detection -------------
-        pick_det = self._last_pick_detection
-        if pick_det and pick_det.get("found") and pick_det.get("target") == self.pick_target:
+        # 2. Detect pick target ------------------------------------------------
+        pick_det = self._detect_target(rgb, self.pick_target)
+        if pick_det and pick_det["found"]:
             point_3d = self._bbox_to_3d(pick_det["bbox"], rgb.shape, aligned_depth)
             if point_3d is not None:
                 msg = PointStamped()
@@ -564,21 +471,20 @@ class ImageNode(Node):
                 self.pick_global_pub.publish(msg)
                 self.get_logger().info(
                     f"pick_target_global: '{self.pick_target}' "
-                    f"({point_3d[0]:.3f}, {point_3d[1]:.3f}, {point_3d[2]:.3f})m"
+                    f"({point_3d[0]:.3f}, {point_3d[1]:.3f}, {point_3d[2]:.3f})m "
+                    f"[conf={pick_det['confidence']:.2f}]"
                 )
             else:
                 self.get_logger().warn(
                     f"'{self.pick_target}' detected but no valid depth"
                 )
         else:
-            self.get_logger().debug(
-                f"No pick detection cached for '{self.pick_target}'"
-            )
+            self.get_logger().debug(f"YOLO: '{self.pick_target}' not found")
 
-        # 5. Publish /place_target_global from cached place detection -----------
+        # 3. Detect place target -----------------------------------------------
         if self.place_target and self.place_target != "none":
-            place_det = self._last_place_detection
-            if place_det and place_det.get("found") and place_det.get("target") == self.place_target:
+            place_det = self._detect_target(rgb, self.place_target)
+            if place_det and place_det["found"]:
                 point_3d = self._bbox_to_3d(place_det["bbox"], rgb.shape, aligned_depth)
                 if point_3d is not None:
                     msg = PointStamped()
@@ -590,7 +496,8 @@ class ImageNode(Node):
                     self.place_global_pub.publish(msg)
                     self.get_logger().info(
                         f"place_target_global: '{self.place_target}' "
-                        f"({point_3d[0]:.3f}, {point_3d[1]:.3f}, {point_3d[2]:.3f})m"
+                        f"({point_3d[0]:.3f}, {point_3d[1]:.3f}, {point_3d[2]:.3f})m "
+                        f"[conf={place_det['confidence']:.2f}]"
                     )
                 else:
                     self.get_logger().warn(
