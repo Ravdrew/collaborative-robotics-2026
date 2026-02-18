@@ -1,6 +1,10 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="tidybot_wx250s_bimanual">
 
+  <!-- When true, include camera optical frames in URDF (needed for simulation).
+       On real hardware, the RealSense driver publishes these TFs with correct calibration. -->
+  <xacro:arg name="include_camera_optical_frames" default="true"/>
+
   <!-- Material definitions -->
   <material name="silver">
     <color rgba="0.75 0.75 0.75 1"/>
@@ -126,20 +130,23 @@
   </joint>
 
   <!-- Camera optical frames (Z forward, X right, Y down - standard ROS convention) -->
-  <!-- These frames are published by RealSense driver on real robot, but needed in URDF for simulation -->
-  <link name="camera_color_optical_frame"/>
-  <joint name="camera_to_color_optical" type="fixed">
-    <parent link="camera_link"/>
-    <child link="camera_color_optical_frame"/>
-    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
-  </joint>
+  <!-- On real hardware, the RealSense driver publishes these TFs with correct calibration offsets.
+       In simulation, we include them here (co-located, since MuJoCo cameras share one origin). -->
+  <xacro:if value="$(arg include_camera_optical_frames)">
+    <link name="camera_color_optical_frame"/>
+    <joint name="camera_to_color_optical" type="fixed">
+      <parent link="camera_link"/>
+      <child link="camera_color_optical_frame"/>
+      <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
 
-  <link name="camera_depth_optical_frame"/>
-  <joint name="camera_to_depth_optical" type="fixed">
-    <parent link="camera_link"/>
-    <child link="camera_depth_optical_frame"/>
-    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
-  </joint>
+    <link name="camera_depth_optical_frame"/>
+    <joint name="camera_to_depth_optical" type="fixed">
+      <parent link="camera_link"/>
+      <child link="camera_depth_optical_frame"/>
+      <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
+  </xacro:if>
 
   <!-- ==================== WX250s ARM MACRO (6-DOF) ==================== -->
   <xacro:macro name="wx250s_arm" params="prefix x_offset y_offset yaw">

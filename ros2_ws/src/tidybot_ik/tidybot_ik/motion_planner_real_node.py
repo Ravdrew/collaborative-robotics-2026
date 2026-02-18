@@ -56,6 +56,18 @@ class MotionPlannerRealNode(Node):
     # [waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate]
     DEFAULT_SEED = np.array([0.0, -1.0, 0.8, 0.0, 0.5, 0.0])
 
+    # Additional seed configurations for multi-seed IK.
+    # These cover different arm poses to help the local IK solver
+    # converge from various regions of the configuration space.
+    EXTRA_SEEDS = [
+        np.array([0.0, -0.3, 0.7, 0.0, -1.0, 0.0]),       # Fingers-down-ish
+        np.array([0.0, -0.3, 0.7, np.pi, -1.0, 0.0]),      # Fingers-down, forearm rotated 180°
+        np.array([0.0, -0.3, 0.7, np.pi/2, -1.0, 0.0]),    # Fingers-down, forearm rotated 90°
+        np.array([0.0, -0.3, 0.7, -np.pi/2, -1.0, 0.0]),   # Fingers-down, forearm rotated -90°
+        np.array([0.0, -0.8, 1.0, 0.0, 0.3, 0.0]),         # Arm more extended
+        np.array([0.0, -0.5, 0.5, 0.0, 0.0, 0.0]),         # Mid-range compact
+    ]
+
     def __init__(self):
         super().__init__('motion_planner_real')
 
@@ -65,8 +77,9 @@ class MotionPlannerRealNode(Node):
         self.declare_parameter('ik_max_iterations', 200)  # More iterations
         self.declare_parameter('position_tolerance', 0.03)  # 3cm
         self.declare_parameter('orientation_tolerance', 0.1)  # ~6 deg
-        self.declare_parameter('min_collision_distance', 0.05)  # 5cm
+        self.declare_parameter('min_collision_distance', 0.03)  # 3cm
         self.declare_parameter('ik_damping', 1e-5)  # Less damping for better convergence
+        self.declare_parameter('max_ik_seeds', 7)  # Max number of IK seeds to try
 
         # Get parameters
         urdf_path_param = self.get_parameter('urdf_path').get_parameter_value().string_value
@@ -76,6 +89,7 @@ class MotionPlannerRealNode(Node):
         self.orientation_tolerance = self.get_parameter('orientation_tolerance').get_parameter_value().double_value
         self.min_collision_distance = self.get_parameter('min_collision_distance').get_parameter_value().double_value
         self.ik_damping = self.get_parameter('ik_damping').get_parameter_value().double_value
+        self.max_ik_seeds = self.get_parameter('max_ik_seeds').get_parameter_value().integer_value
 
         # Find URDF path
         if urdf_path_param:
@@ -141,6 +155,7 @@ class MotionPlannerRealNode(Node):
             'left': ['left_upper_arm_link', 'left_upper_forearm_link',
                      'left_lower_forearm_link', 'left_wrist_link', 'left_gripper_link'],
         }
+        self.base_collision_frames = ['base_link', 'right_arm_base_link', 'left_arm_base_link']
 
         # Get collision frame IDs
         self.collision_frame_ids = {}
@@ -149,6 +164,11 @@ class MotionPlannerRealNode(Node):
             for fname in self.collision_frames[arm]:
                 if self.model.existFrame(fname):
                     self.collision_frame_ids[arm].append(self.model.getFrameId(fname))
+
+        self.base_collision_frame_ids = []
+        for fname in self.base_collision_frames:
+            if self.model.existFrame(fname):
+                self.base_collision_frame_ids.append(self.model.getFrameId(fname))
 
         # Current joint states
         self.current_joint_positions = {}
@@ -228,8 +248,11 @@ class MotionPlannerRealNode(Node):
                 idx = self.model.joints[jid].idx_q
                 q[idx] = positions[i]
 
-    def numerical_jacobian(self, q: np.ndarray, arm_name: str, ee_frame_id: int, eps: float = 1e-4) -> np.ndarray:
-        """Compute numerical Jacobian for position (3x6 matrix).
+    def numerical_jacobian(self, q: np.ndarray, arm_name: str, ee_frame_id: int,
+                            use_orientation: bool = False, eps: float = 1e-4) -> np.ndarray:
+        """Compute numerical Jacobian.
+
+        Returns a 3×n (position only) or 6×n (position + orientation) matrix.
 
         Note: We use numerical Jacobian because Pinocchio's analytical Jacobian
         has issues with floating base models.
@@ -240,20 +263,24 @@ class MotionPlannerRealNode(Node):
                 jid = self.joint_ids[jname]
                 arm_idx_q.append(self.model.joints[jid].idx_q)
 
-        # Get current position
+        # Get current pose
         pin.forwardKinematics(self.model, self.data, q)
         pin.updateFramePlacements(self.model, self.data)
         pos0 = self.data.oMf[ee_frame_id].translation.copy()
+        R0 = self.data.oMf[ee_frame_id].rotation.copy() if use_orientation else None
 
-        # Compute numerical derivatives
-        J = np.zeros((3, len(arm_idx_q)))
+        rows = 6 if use_orientation else 3
+        J = np.zeros((rows, len(arm_idx_q)))
         for i, idx_q in enumerate(arm_idx_q):
             q_plus = q.copy()
             q_plus[idx_q] += eps
             pin.forwardKinematics(self.model, self.data, q_plus)
             pin.updateFramePlacements(self.model, self.data)
             pos_plus = self.data.oMf[ee_frame_id].translation.copy()
-            J[:, i] = (pos_plus - pos0) / eps
+            J[:3, i] = (pos_plus - pos0) / eps
+            if use_orientation:
+                R_plus = self.data.oMf[ee_frame_id].rotation.copy()
+                J[3:, i] = pin.log3(R0.T @ R_plus) / eps
 
         return J
 
@@ -309,38 +336,55 @@ class MotionPlannerRealNode(Node):
                 jid = self.joint_ids[jname]
                 arm_idx_q.append(self.model.joints[jid].idx_q)
 
-        # Target position
+        # Target position and rotation
         target_position = target_pose.translation
+        target_rotation = target_pose.rotation
 
         # Joint limits
         limits = list(self.JOINT_LIMITS.values())
 
-        # IK iteration using numerical Jacobian (position-only for now)
-        # Note: Orientation control can be added later with 6D Jacobian
+        # IK iteration using numerical Jacobian
+        # When use_orientation=True we use a 6D error (position + orientation)
         for iteration in range(self.ik_max_iterations):
             # Forward kinematics
             pin.forwardKinematics(self.model, self.data, q)
             pin.updateFramePlacements(self.model, self.data)
 
-            # Current position
-            current_position = self.data.oMf[ee_frame_id].translation
+            # Current pose
+            current_pose = self.data.oMf[ee_frame_id]
+            current_position = current_pose.translation
 
             # Position error
             pos_error_vec = target_position - current_position
             pos_error = np.linalg.norm(pos_error_vec)
 
-            # Check convergence (position only for now)
-            if pos_error < self.position_tolerance:
-                break
+            if use_orientation:
+                # Orientation error as axis-angle vector
+                ori_error_vec = pin.log3(target_rotation.T @ current_pose.rotation)
+                ori_error = np.linalg.norm(ori_error_vec)
 
-            # Compute numerical Jacobian (3x6 for position)
-            J = self.numerical_jacobian(q, arm_name, ee_frame_id)
+                # Convergence check (both position and orientation)
+                if pos_error < self.position_tolerance and ori_error < self.orientation_tolerance:
+                    break
+
+                # 6D error vector and 6×6 Jacobian
+                error_vec = np.concatenate([pos_error_vec, -ori_error_vec])
+                J = self.numerical_jacobian(q, arm_name, ee_frame_id, use_orientation=True)
+                dim = 6
+            else:
+                # Position-only convergence check
+                if pos_error < self.position_tolerance:
+                    break
+
+                error_vec = pos_error_vec
+                J = self.numerical_jacobian(q, arm_name, ee_frame_id, use_orientation=False)
+                dim = 3
 
             # Damped least squares
-            JJT = J @ J.T + self.ik_damping * np.eye(3)
+            JJT = J @ J.T + self.ik_damping * np.eye(dim)
 
             try:
-                v = J.T @ np.linalg.solve(JJT, pos_error_vec)
+                v = J.T @ np.linalg.solve(JJT, error_vec)
             except np.linalg.LinAlgError:
                 break
 
@@ -348,15 +392,6 @@ class MotionPlannerRealNode(Node):
             for i, idx_q in enumerate(arm_idx_q):
                 new_val = q[idx_q] + self.ik_dt * v[i]
                 q[idx_q] = np.clip(new_val, limits[i][0], limits[i][1])
-
-        # Compute final orientation error if requested
-        ori_error = 0.0
-        if use_orientation:
-            current_pose = self.data.oMf[ee_frame_id]
-            R_diff = target_pose.rotation.T @ current_pose.rotation
-            trace = np.trace(R_diff)
-            cos_angle = np.clip((trace - 1) / 2, -1, 1)
-            ori_error = np.arccos(cos_angle)
 
         # Extract final solution
         solution = self.get_arm_from_configuration(q, arm_name)
@@ -392,7 +427,11 @@ class MotionPlannerRealNode(Node):
         return success, solution, position_error, orientation_error
 
     def compute_jacobian_condition(self, arm_name: str, joint_positions: np.ndarray) -> float:
-        """Compute Jacobian condition number at given configuration."""
+        """Compute Jacobian condition number at given configuration.
+
+        Uses the full 6×6 Jacobian (position + orientation) for a 6-DOF arm,
+        which gives a square matrix and a more meaningful condition number.
+        """
         q = pin.neutral(self.model)
         self.set_arm_configuration(q, arm_name, joint_positions)
 
@@ -400,8 +439,8 @@ class MotionPlannerRealNode(Node):
         if ee_frame_id is None:
             return float('inf')
 
-        # Compute numerical Jacobian (3x6 for position)
-        J = self.numerical_jacobian(q, arm_name, ee_frame_id)
+        # Use full 6×6 Jacobian for 6-DOF arm (square → well-defined cond number)
+        J = self.numerical_jacobian(q, arm_name, ee_frame_id, use_orientation=True)
 
         try:
             cond = np.linalg.cond(J)
@@ -425,6 +464,7 @@ class MotionPlannerRealNode(Node):
         pin.updateFramePlacements(self.model, self.data)
 
         # Get positions of collision frames and check pairwise distances
+        # for both arm-arm and arm-base proximity.
         min_distance = float('inf')
 
         for right_fid in self.collision_frame_ids['right']:
@@ -433,6 +473,14 @@ class MotionPlannerRealNode(Node):
                 left_pos = self.data.oMf[left_fid].translation
                 dist = np.linalg.norm(right_pos - left_pos)
                 min_distance = min(min_distance, dist)
+
+        for arm in ['right', 'left']:
+            for arm_fid in self.collision_frame_ids[arm]:
+                arm_pos = self.data.oMf[arm_fid].translation
+                for base_fid in self.base_collision_frame_ids:
+                    base_pos = self.data.oMf[base_fid].translation
+                    dist = np.linalg.norm(arm_pos - base_pos)
+                    min_distance = min(min_distance, dist)
 
         collision_free = min_distance >= self.min_collision_distance
         return collision_free, min_distance
@@ -447,28 +495,67 @@ class MotionPlannerRealNode(Node):
             response.message = f"Invalid arm_name '{request.arm_name}'. Use 'right' or 'left'."
             return response
 
-        self.get_logger().info(f'Planning for {arm_name} arm...')
+        mode = 'pos+orient' if request.use_orientation else 'pos-only'
+        self.get_logger().info(f'Planning for {arm_name} arm ({mode})...')
 
-        # Get current joint positions as seed
-        seed = self.get_arm_joint_positions(arm_name)
+        # Get current joint positions as primary seed
+        primary_seed = self.get_arm_joint_positions(arm_name)
         other_arm = 'left' if arm_name == 'right' else 'right'
         other_arm_positions = self.get_arm_joint_positions(other_arm)
 
         # Convert target pose to SE3
         target_se3 = self.pose_to_se3(request.target_pose)
 
-        # Solve IK
-        ik_success, solution, pos_error, ori_error = self.solve_ik(
-            arm_name, target_se3, request.use_orientation, seed
-        )
+        # Build seed list: current position first, then extra seeds.
+        # For the left arm, mirror the waist and forearm_roll signs.
+        seeds = [primary_seed]
+        for extra in self.EXTRA_SEEDS:
+            if arm_name == 'left':
+                mirrored = extra.copy()
+                mirrored[0] = -mirrored[0]   # waist
+                mirrored[3] = -mirrored[3]   # forearm_roll
+                seeds.append(mirrored)
+            else:
+                seeds.append(extra.copy())
+
+        # Cap the number of seeds to try
+        seeds = seeds[:self.max_ik_seeds]
+
+        # Try IK with each seed, keep the best successful result
+        best_result = None  # (solution, pos_error, ori_error)
+        seeds_tried = 0
+        for seed in seeds:
+            seeds_tried += 1
+            ik_success, solution, pos_error, ori_error = self.solve_ik(
+                arm_name, target_se3, request.use_orientation, seed
+            )
+            if ik_success:
+                # Prefer solutions with lower total error
+                total_err = pos_error + ori_error
+                if best_result is None or total_err < (best_result[1] + best_result[2]):
+                    best_result = (solution, pos_error, ori_error)
+                # Early exit if solution is already very good
+                if pos_error < self.position_tolerance * 0.5 and \
+                   (not request.use_orientation or ori_error < self.orientation_tolerance * 0.5):
+                    break
+
+        if best_result is not None:
+            solution, pos_error, ori_error = best_result
+            self.get_logger().info(f'IK solved after {seeds_tried}/{len(seeds)} seed(s)')
+        else:
+            # All seeds failed — report the result from the primary seed
+            _, solution, pos_error, ori_error = self.solve_ik(
+                arm_name, target_se3, request.use_orientation, primary_seed
+            )
 
         response.position_error = pos_error
         response.orientation_error = ori_error
         response.joint_positions = solution.tolist()
 
-        if not ik_success:
+        if best_result is None:
             response.success = False
-            response.message = f"IK failed: position error={pos_error:.4f}m, orientation error={ori_error:.4f}rad"
+            response.message = (f"IK failed after {len(seeds)} seeds: "
+                                f"position error={pos_error:.4f}m, orientation error={ori_error:.4f}rad")
             self.get_logger().warn(response.message)
             return response
 
@@ -497,7 +584,11 @@ class MotionPlannerRealNode(Node):
 
         # Planning succeeded
         response.success = True
-        response.message = f"Planning succeeded: pos_err={pos_error:.4f}m, cond={condition_number:.1f}, min_dist={min_dist:.3f}m"
+        if request.use_orientation:
+            response.message = (f"Planning succeeded: pos_err={pos_error:.4f}m, "
+                               f"ori_err={ori_error:.4f}rad, cond={condition_number:.1f}, min_dist={min_dist:.3f}m")
+        else:
+            response.message = f"Planning succeeded: pos_err={pos_error:.4f}m, cond={condition_number:.1f}, min_dist={min_dist:.3f}m"
         self.get_logger().info(response.message)
 
         # Execute if requested

@@ -24,6 +24,19 @@ import numpy as np
 class TestPlanner(Node):
     """Demo node for testing motion planning service."""
 
+    # Common orientations in base_link frame (quaternion wxyz)
+    #
+    # The pinch_site x-axis is the gripper finger direction.
+    # For a top-down grasp the fingers must point straight down (-Z).
+    #
+    # Fingers-down grasp (Ry(π/2) in base_link):
+    #   site x -> base_link -Z (fingers point down)
+    #   site z -> base_link +X (approach from front)
+    ORIENT_FINGERS_DOWN = (0.5, 0.5, 0.5, -0.5)  # (qw, qx, qy, qz)
+
+    # Fingers-down with wrist rotated 90° around the approach axis:
+    ORIENT_FINGERS_DOWN_ROT90 = (0.707107, 0.0, 0.707107, 0.0)
+
     def __init__(self):
         super().__init__('test_planner')
 
@@ -42,10 +55,6 @@ class TestPlanner(Node):
         self.get_logger().info('Service connected!')
         self.get_logger().info('')
 
-        # Run demo after short delay
-        self.create_timer(1.0, self.run_demo_once)
-        self.demo_run = False
-
     def create_pose(self, x: float, y: float, z: float,
                     qw: float = 1.0, qx: float = 0.0,
                     qy: float = 0.0, qz: float = 0.0) -> Pose:
@@ -60,6 +69,21 @@ class TestPlanner(Node):
         pose.orientation.z = qz
         return pose
 
+    def call_service_sync(self, request, timeout_sec=15.0):
+        """Call service synchronously using spin_until_future_complete."""
+        future = self.plan_client.call_async(request)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=timeout_sec)
+
+        if not future.done():
+            self.get_logger().error('Service call timed out!')
+            return None
+
+        if future.exception() is not None:
+            self.get_logger().error(f'Service call exception: {future.exception()}')
+            return None
+
+        return future.result()
+
     def plan_and_execute(self, arm_name: str, pose: Pose,
                         use_orientation: bool = True,
                         duration: float = 2.0) -> bool:
@@ -72,21 +96,24 @@ class TestPlanner(Node):
         request.duration = duration
         request.max_condition_number = 100.0
 
-        self.get_logger().info(
-            f'Planning {arm_name} arm to: '
-            f'({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})'
-        )
+        pos_str = f'({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})'
+        if use_orientation:
+            ori_str = (f' orient=({pose.orientation.w:.3f}, {pose.orientation.x:.3f}, '
+                       f'{pose.orientation.y:.3f}, {pose.orientation.z:.3f})')
+        else:
+            ori_str = ' (position only)'
+        self.get_logger().info(f'Planning {arm_name} arm to: {pos_str}{ori_str}')
 
-        future = self.plan_client.call_async(request)
-        rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
-
-        if future.result() is None:
-            self.get_logger().error('Service call failed!')
+        result = self.call_service_sync(request)
+        if result is None:
             return False
 
-        result = future.result()
         if result.success:
             self.get_logger().info(f'  SUCCESS: {result.message}')
+            if use_orientation:
+                self.get_logger().info(
+                    f'  Errors: pos={result.position_error:.4f}m, '
+                    f'ori={result.orientation_error:.4f}rad ({np.degrees(result.orientation_error):.1f}°)')
             if result.executed:
                 self.get_logger().info(f'  Executing over {duration}s...')
             return True
@@ -94,50 +121,85 @@ class TestPlanner(Node):
             self.get_logger().warn(f'  FAILED: {result.message}')
             return False
 
-    def run_demo_once(self):
-        """Run the demo sequence once."""
-        if self.demo_run:
-            return
-        self.demo_run = True
+    def run_demos(self):
+        """Run the demo sequence.
 
-        # Top-down grasp orientation: gripper pointing down
-        # Quaternion for 180 deg rotation around X-axis
-        top_down = {'qw': 0.0, 'qx': 1.0, 'qy': 0.0, 'qz': 0.0}
+        Coordinate frame (base_link):
+          -Y is forward, +X is left, +Z is up.
+          Arm shoulders: right=(-0.15, -0.12, 0.45), left=(0.15, -0.12, 0.45)
+          Arms extend forward (-Y) from the shoulder mounts.
+          Reachable workspace: ~0.3-0.5m from shoulder.
 
-        # Demo 1: Move right arm to position in front of robot
+        Orientation conventions (quaternion wxyz in base_link frame):
+          Fingers-down Ry(π/2):       (0.707, 0, 0.707, 0)  — gripper fingers point -Z
+          Fingers-down rotated 90°:   (0.5, 0.5, 0.5, -0.5)
+        """
+        qw_fd, qx_fd, qy_fd, qz_fd = self.ORIENT_FINGERS_DOWN
+        qw_fr, qx_fr, qy_fr, qz_fr = self.ORIENT_FINGERS_DOWN_ROT90
+
+        # ── Part A: Position-only demos ──────────────────────────────
+
+        self.get_logger().info('=' * 50)
+        self.get_logger().info('Part A: Position-only IK demos')
+        self.get_logger().info('=' * 50)
+
+        # Demo 1: Right arm forward reach (position only)
         self.get_logger().info('-' * 40)
-        self.get_logger().info('Demo 1: Right arm forward reach')
-        pose1 = self.create_pose(0.35, -0.15, 0.45, **top_down)
-        self.plan_and_execute('right', pose1, use_orientation=True, duration=2.0)
-        time.sleep(2.5)
+        self.get_logger().info('Demo 1: Right arm forward reach (position only)')
+        pose1 = self.create_pose(-0.10, -0.35, 0.55)
+        self.plan_and_execute('right', pose1, use_orientation=False, duration=2.0)
+        input('\n  Press Enter for next demo...\n')
 
-        # Demo 2: Move right arm to side (position only)
+        # Demo 2: Right arm side reach (position only)
         self.get_logger().info('-' * 40)
         self.get_logger().info('Demo 2: Right arm side reach (position only)')
-        pose2 = self.create_pose(0.25, -0.30, 0.50)
+        pose2 = self.create_pose(-0.25, -0.35, 0.50)
         self.plan_and_execute('right', pose2, use_orientation=False, duration=2.0)
-        time.sleep(2.5)
+        input('\n  Press Enter for next demo...\n')
 
-        # Demo 3: Try a pose that might cause arm collision (intentional test)
+        # Demo 3: Left arm forward (position only)
         self.get_logger().info('-' * 40)
-        self.get_logger().info('Demo 3: Left arm forward (should succeed)')
-        pose3 = self.create_pose(0.35, 0.15, 0.45, **top_down)
-        self.plan_and_execute('left', pose3, use_orientation=True, duration=2.0)
-        time.sleep(2.5)
+        self.get_logger().info('Demo 3: Left arm forward (position only)')
+        pose3 = self.create_pose(0.10, -0.35, 0.55)
+        self.plan_and_execute('left', pose3, use_orientation=False, duration=2.0)
+        input('\n  Press Enter for next demo...\n')
 
-        # Demo 4: Try to reach very far (might fail due to limits/singularity)
+        # ── Part B: Orientation-tracking demos ───────────────────────
+
+        self.get_logger().info('')
+        self.get_logger().info('=' * 50)
+        self.get_logger().info('Part B: Position + Orientation IK demos')
+        self.get_logger().info('=' * 50)
+
+        # Demo 4: Right arm fingers-down grasp
+        #   Gripper fingers point straight down — good for picking objects from a table
         self.get_logger().info('-' * 40)
-        self.get_logger().info('Demo 4: Right arm far reach (may fail - testing limits)')
-        pose4 = self.create_pose(0.60, -0.15, 0.40, **top_down)
+        self.get_logger().info('Demo 4: Right arm fingers-down grasp')
+        pose4 = self.create_pose(-0.10, -0.35, 0.55, qw_fd, qx_fd, qy_fd, qz_fd)
         self.plan_and_execute('right', pose4, use_orientation=True, duration=2.0)
-        time.sleep(2.5)
+        input('\n  Press Enter for next demo...\n')
 
-        # Demo 5: Move both arms close (testing collision check)
+        # Demo 5: Right arm fingers-down at different position
         self.get_logger().info('-' * 40)
-        self.get_logger().info('Demo 5: Right arm center (testing collision check)')
-        pose5 = self.create_pose(0.35, -0.05, 0.45, **top_down)  # Close to center
+        self.get_logger().info('Demo 5: Right arm fingers-down lower position')
+        pose5 = self.create_pose(-0.05, -0.35, 0.50, qw_fd, qx_fd, qy_fd, qz_fd)
         self.plan_and_execute('right', pose5, use_orientation=True, duration=2.0)
-        time.sleep(2.5)
+        input('\n  Press Enter for next demo...\n')
+
+        # Demo 6: Right arm fingers-down-rot90 (side reach)
+        #   Wrist rotated 90° — different grasp angle for side objects
+        self.get_logger().info('-' * 40)
+        self.get_logger().info('Demo 6: Right arm fingers-down rotated (side reach)')
+        pose6 = self.create_pose(-0.20, -0.30, 0.50, qw_fr, qx_fr, qy_fr, qz_fr)
+        self.plan_and_execute('right', pose6, use_orientation=True, duration=2.0)
+        input('\n  Press Enter for next demo...\n')
+
+        # Demo 7: Left arm fingers-down
+        self.get_logger().info('-' * 40)
+        self.get_logger().info('Demo 7: Left arm fingers-down')
+        pose7 = self.create_pose(0.10, -0.35, 0.55, qw_fd, qx_fd, qy_fd, qz_fd)
+        self.plan_and_execute('left', pose7, use_orientation=True, duration=2.0)
+        time.sleep(3.0)
 
         self.get_logger().info('')
         self.get_logger().info('=' * 50)
@@ -150,7 +212,9 @@ def main(args=None):
     node = TestPlanner()
 
     try:
-        rclpy.spin(node)
+        # Run tests directly instead of using timer callback
+        # This avoids nested executor issues with spin_until_future_complete
+        node.run_demos()
     except KeyboardInterrupt:
         pass
     finally:

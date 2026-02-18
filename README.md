@@ -57,7 +57,7 @@ cd collaborative-robotics-2026
 
 The setup script handles everything: system dependencies, ROS2 Humble, Python environment (`uv sync`), and building the ROS2 workspace (`colcon build`).
 
-## Quick Start
+## Quick Start SIMULATION
 
 ### Option 1: Standalone MuJoCo Simulation (No ROS2)
 
@@ -107,6 +107,31 @@ ros2 launch tidybot_bringup sim.launch.py use_rviz:=false
 
 # Disable MuJoCo viewer
 ros2 launch tidybot_bringup sim.launch.py show_mujoco_viewer:=false
+```
+
+## Quick Start REAL
+
+NOTE: You do not need to re-run "colcon build" for every new terminal, re-build is only necessary whenver source code was modified. Make sure to re-source for new terminals.
+
+**Terminal 1: Launch Initialization of TidyBot**
+```bash
+cd ros2_ws
+source setup_env.bash 
+
+# Launch bringup
+ros2 launch tidybot_bringup real.launch.py
+```
+
+**Terminal 2: Run Command Script**
+```bash
+cd ros2_ws
+source setup_env.bash 
+
+# Test base movement
+ros2 run tidybot_bringup test_base_real.py
+
+# Test bimanual arms
+ros2 run tidybot_bringup test_arms_real.py
 ```
 
 ## Repository Structure

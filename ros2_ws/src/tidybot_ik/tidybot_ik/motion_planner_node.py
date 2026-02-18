@@ -26,6 +26,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import Pose
+from nav_msgs.msg import Odometry
 
 from tidybot_msgs.msg import ArmCommand
 from tidybot_msgs.srv import PlanToTarget
@@ -44,6 +45,15 @@ class MotionPlannerNode(Node):
         'wrist_rotate': (-3.14159, 3.14159),
     }
 
+    # Default seed position (non-singular) - matches real node
+    # [waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate]
+    DEFAULT_SEED = np.array([0.0, -1.0, 0.8, 0.0, 0.5, 0.0])
+
+    @staticmethod
+    def normalize_angle(angle: float) -> float:
+        """Normalize angle to [-pi, pi]."""
+        return (angle + np.pi) % (2 * np.pi) - np.pi
+
     def __init__(self):
         super().__init__('motion_planner')
 
@@ -53,7 +63,8 @@ class MotionPlannerNode(Node):
         self.declare_parameter('ik_max_iterations', 500)
         self.declare_parameter('position_tolerance', 0.01)  # 1cm
         self.declare_parameter('orientation_tolerance', 0.1)  # ~6 deg
-        self.declare_parameter('min_collision_distance', 0.05)  # 5cm
+        self.declare_parameter('min_collision_distance', 0.03)  # 3cm
+        self.declare_parameter('trajectory_check_rate_hz', 50.0)  # Match arm_controller control_rate
 
         # Get parameters
         model_path_param = self.get_parameter('model_path').get_parameter_value().string_value
@@ -62,6 +73,9 @@ class MotionPlannerNode(Node):
         self.position_tolerance = self.get_parameter('position_tolerance').get_parameter_value().double_value
         self.orientation_tolerance = self.get_parameter('orientation_tolerance').get_parameter_value().double_value
         self.min_collision_distance = self.get_parameter('min_collision_distance').get_parameter_value().double_value
+        self.trajectory_check_rate_hz = self.get_parameter(
+            'trajectory_check_rate_hz'
+        ).get_parameter_value().double_value
 
         # Find model path
         if model_path_param:
@@ -91,12 +105,43 @@ class MotionPlannerNode(Node):
                      'left_forearm_roll', 'left_wrist_angle', 'left_wrist_rotate'],
         }
 
-        # Get joint qpos addresses
+        # Get joint qpos addresses and dof addresses
         self.joint_qpos_addrs = {}
+        self.joint_dof_addrs = {}
         for arm in ['right', 'left']:
             for jname in self.arm_joints[arm]:
                 jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, jname)
                 self.joint_qpos_addrs[jname] = self.model.jnt_qposadr[jid]
+                self.joint_dof_addrs[jname] = self.model.jnt_dofadr[jid]
+
+        # Base joint qpos addresses (needed for correct FK in IK solver)
+        self.base_joint_names = ['joint_x', 'joint_y', 'joint_th']
+        self.base_joint_addrs = {}
+        for jname in self.base_joint_names:
+            jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+            self.base_joint_addrs[jname] = self.model.jnt_qposadr[jid]
+
+        # Precompute VelocityLimit for each arm to freeze all non-arm joints
+        # This uses inequality constraints (compatible with quadprog solver)
+        all_joint_names = []
+        for i in range(self.model.njnt):
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, i)
+            if name:
+                all_joint_names.append(name)
+
+        self.freeze_vel_limits = {}
+        for arm in ['right', 'left']:
+            arm_joint_set = set(self.arm_joints[arm])
+            vel_limits = {}
+            for jname in all_joint_names:
+                if jname not in arm_joint_set:
+                    jid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, jname)
+                    jtype = self.model.jnt_type[jid]
+                    if jtype != mujoco.mjtJoint.mjJNT_FREE:
+                        vel_limits[jname] = np.array([1e-10])
+            self.freeze_vel_limits[arm] = mink.VelocityLimit(
+                self.model, vel_limits
+            )
 
         # End-effector sites
         self.ee_sites = {
@@ -106,8 +151,20 @@ class MotionPlannerNode(Node):
 
         # Bodies for collision checking
         self.collision_bodies = {
-            'right': ['right_upper_arm_link', 'right_forearm_link', 'right_wrist_link', 'right_gripper_link'],
-            'left': ['left_upper_arm_link', 'left_forearm_link', 'left_wrist_link', 'left_gripper_link'],
+            'right': [
+                'right_upper_arm_link',
+                'right_upper_forearm_link',
+                'right_lower_forearm_link',
+                'right_wrist_link',
+                'right_gripper_link',
+            ],
+            'left': [
+                'left_upper_arm_link',
+                'left_upper_forearm_link',
+                'left_lower_forearm_link',
+                'left_wrist_link',
+                'left_gripper_link',
+            ],
         }
 
         # Get body IDs
@@ -118,9 +175,21 @@ class MotionPlannerNode(Node):
                 bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, bname)
                 self.body_ids[arm].append(bid)
 
+        # Base body IDs for arm-base collision checks
+        self.base_body_ids = []
+        base_bid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, 'base_link')
+        if base_bid >= 0:
+            self.base_body_ids.append(base_bid)
+
         # Current joint states
         self.current_joint_positions = {}
         self.joint_lock = Lock()
+
+        # Current base pose (from odometry)
+        self.base_x = 0.0
+        self.base_y = 0.0
+        self.base_th = np.pi / 2  # Default: robot faces +X (home keyframe)
+        self.base_lock = Lock()
 
         # Publishers for arm commands (execution)
         self.arm_cmd_pubs = {
@@ -133,6 +202,11 @@ class MotionPlannerNode(Node):
             JointState, '/joint_states', self.joint_state_callback, 10
         )
 
+        # Subscriber for odometry (base pose)
+        self.odom_sub = self.create_subscription(
+            Odometry, '/odom', self.odom_callback, 10
+        )
+
         # Service for planning
         self.plan_service = self.create_service(
             PlanToTarget, '/plan_to_target', self.plan_to_target_callback
@@ -141,6 +215,23 @@ class MotionPlannerNode(Node):
         self.get_logger().info('Motion planner initialized')
         self.get_logger().info('Service: /plan_to_target')
 
+    def odom_callback(self, msg: Odometry):
+        """Update current base pose from odometry."""
+        with self.base_lock:
+            self.base_x = msg.pose.pose.position.x
+            self.base_y = msg.pose.pose.position.y
+            # Extract yaw from quaternion
+            qz = msg.pose.pose.orientation.z
+            qw = msg.pose.pose.orientation.w
+            self.base_th = 2.0 * np.arctan2(qz, qw)
+
+    def set_base_joints(self):
+        """Set base joint values in internal MuJoCo model to match actual robot state."""
+        with self.base_lock:
+            self.data.qpos[self.base_joint_addrs['joint_x']] = self.base_x
+            self.data.qpos[self.base_joint_addrs['joint_y']] = self.base_y
+            self.data.qpos[self.base_joint_addrs['joint_th']] = self.base_th
+
     def joint_state_callback(self, msg: JointState):
         """Update current joint positions from joint states."""
         with self.joint_lock:
@@ -148,31 +239,70 @@ class MotionPlannerNode(Node):
                 if i < len(msg.position):
                     self.current_joint_positions[name] = msg.position[i]
 
-    def get_arm_joint_positions(self, arm_name: str) -> np.ndarray:
-        """Get current joint positions for an arm."""
+    def get_arm_joint_positions(self, arm_name: str, use_default_if_zero: bool = True) -> np.ndarray:
+        """Get current joint positions for an arm.
+
+        If use_default_if_zero is True and positions are all near zero,
+        returns DEFAULT_SEED to avoid singularity issues.
+        """
         with self.joint_lock:
             positions = np.zeros(6)
             for i, jname in enumerate(self.arm_joints[arm_name]):
                 positions[i] = self.current_joint_positions.get(jname, 0.0)
+
+            # Use default seed if positions are all near zero (uninitialized or singular config)
+            if use_default_if_zero and np.allclose(positions, 0.0, atol=0.01):
+                self.get_logger().info(f'Using default seed for {arm_name} arm (current positions near zero)')
+                return self.DEFAULT_SEED.copy()
+
             return positions
 
     def pose_to_se3(self, pose: Pose, use_orientation: bool) -> mink.SE3:
-        """Convert geometry_msgs/Pose to mink SE3."""
-        position = np.array([pose.position.x, pose.position.y, pose.position.z])
+        """Convert geometry_msgs/Pose (in base_link frame) to mink SE3 (in world frame).
+
+        The target pose is specified in the base_link frame, but Mink's FrameTask
+        expects the target in the MuJoCo world frame. We transform using the current
+        base pose (joint_x, joint_y, joint_th).
+        """
+        # Target position in base_link frame
+        pos_base = np.array([pose.position.x, pose.position.y, pose.position.z])
+
+        # Get current base pose
+        with self.base_lock:
+            bx, by, bth = self.base_x, self.base_y, self.base_th
+
+        # Rotation matrix for base yaw (around Z)
+        c, s = np.cos(bth), np.sin(bth)
+        R_base = np.array([
+            [c, -s, 0],
+            [s,  c, 0],
+            [0,  0, 1],
+        ])
+
+        # Transform position: world_pos = R_base @ pos_base + [bx, by, 0]
+        world_pos = R_base @ pos_base + np.array([bx, by, 0.0])
+
+        # Base orientation as SO3 (yaw rotation around Z)
+        # Quaternion in wxyz format: [cos(th/2), 0, 0, sin(th/2)]
+        base_quat = np.array([np.cos(bth / 2), 0.0, 0.0, np.sin(bth / 2)])
+        base_rot = mink.SO3(base_quat)
 
         if use_orientation:
             # Quaternion in wxyz format for mink
             quat = np.array([pose.orientation.w, pose.orientation.x,
                             pose.orientation.y, pose.orientation.z])
+            target_rot_base = mink.SO3(quat)
+            # World orientation = base_rot @ target_rot_in_base
+            world_rot = base_rot @ target_rot_base
             return mink.SE3.from_rotation_and_translation(
-                rotation=mink.SO3(quat),
-                translation=position
+                rotation=world_rot,
+                translation=world_pos,
             )
         else:
-            # Use identity orientation
+            # Use base orientation as default (so ee keeps pointing forward)
             return mink.SE3.from_rotation_and_translation(
-                rotation=mink.SO3.identity(),
-                translation=position
+                rotation=base_rot,
+                translation=world_pos,
             )
 
     def solve_ik(self, arm_name: str, target_pose: mink.SE3,
@@ -180,13 +310,25 @@ class MotionPlannerNode(Node):
         """
         Solve inverse kinematics using Mink.
 
+        Only the specified arm's joints are allowed to move; all other DOFs
+        (base, camera, other arm, grippers) are frozen via DofFreezingTask.
+
         Returns: (success, joint_positions, position_error, orientation_error)
         """
         # Create a fresh configuration with current seed
         self.data.qpos[:] = 0
+        # Set base joints to match actual robot pose (critical for correct FK)
+        self.set_base_joints()
+        # Set the active arm's seed
         for i, jname in enumerate(self.arm_joints[arm_name]):
             addr = self.joint_qpos_addrs[jname]
             self.data.qpos[addr] = seed[i]
+        # Set the other arm to its current position (for collision awareness)
+        other_arm = 'left' if arm_name == 'right' else 'right'
+        other_positions = self.get_arm_joint_positions(other_arm, use_default_if_zero=False)
+        for i, jname in enumerate(self.arm_joints[other_arm]):
+            addr = self.joint_qpos_addrs[jname]
+            self.data.qpos[addr] = other_positions[i]
 
         mujoco.mj_forward(self.model, self.data)
         self.configuration.update(self.data.qpos)
@@ -205,6 +347,7 @@ class MotionPlannerNode(Node):
         ee_task.set_target(target_pose)
 
         # Solve IK iteratively
+        # VelocityLimit freezes all non-arm DOFs (compatible with quadprog)
         for iteration in range(self.ik_max_iterations):
             vel = mink.solve_ik(
                 self.configuration,
@@ -212,6 +355,7 @@ class MotionPlannerNode(Node):
                 dt=self.ik_dt,
                 solver="quadprog",
                 damping=1e-3,
+                limits=[self.freeze_vel_limits[arm_name]],
             )
             self.configuration.integrate_inplace(vel, self.ik_dt)
 
@@ -223,7 +367,8 @@ class MotionPlannerNode(Node):
         solution = np.zeros(6)
         for i, jname in enumerate(self.arm_joints[arm_name]):
             addr = self.joint_qpos_addrs[jname]
-            solution[i] = self.configuration.q[addr]
+            # Normalize angle to [-pi, pi] before clamping (handles wraparound)
+            solution[i] = self.normalize_angle(self.configuration.q[addr])
 
         # Clamp to joint limits
         for i, (_, (low, high)) in enumerate(self.JOINT_LIMITS.items()):
@@ -231,6 +376,7 @@ class MotionPlannerNode(Node):
 
         # Compute errors
         # Update MuJoCo data with solution to get FK
+        self.set_base_joints()
         for i, jname in enumerate(self.arm_joints[arm_name]):
             addr = self.joint_qpos_addrs[jname]
             self.data.qpos[addr] = solution[i]
@@ -264,6 +410,7 @@ class MotionPlannerNode(Node):
     def compute_jacobian_condition(self, arm_name: str, joint_positions: np.ndarray) -> float:
         """Compute Jacobian condition number at given configuration."""
         # Set joint positions
+        self.set_base_joints()
         for i, jname in enumerate(self.arm_joints[arm_name]):
             addr = self.joint_qpos_addrs[jname]
             self.data.qpos[addr] = joint_positions[i]
@@ -302,11 +449,16 @@ class MotionPlannerNode(Node):
     def check_arm_collision(self, joint_positions_right: np.ndarray,
                            joint_positions_left: np.ndarray) -> tuple:
         """
-        Check for collision between the two arms.
+        Check for collision between the two arms using MuJoCo contact detection.
+
+        Uses MuJoCo's built-in contact detection which considers actual geom
+        shapes, rather than body center-point distances which give false
+        positives when symmetric arm configurations overlap in center position.
 
         Returns: (collision_free, min_distance)
         """
         # Set both arm configurations
+        self.set_base_joints()
         for i, jname in enumerate(self.arm_joints['right']):
             addr = self.joint_qpos_addrs[jname]
             self.data.qpos[addr] = joint_positions_right[i]
@@ -316,18 +468,80 @@ class MotionPlannerNode(Node):
 
         mujoco.mj_forward(self.model, self.data)
 
-        # Get body positions and check pairwise distances
+        # Check MuJoCo contacts for inter-arm and arm-base collisions
+        right_body_set = set(self.body_ids['right'])
+        left_body_set = set(self.body_ids['left'])
+        base_body_set = set(self.base_body_ids)
+        arm_body_set = right_body_set | left_body_set
         min_distance = float('inf')
 
-        for right_bid in self.body_ids['right']:
-            right_pos = self.data.xpos[right_bid]
-            for left_bid in self.body_ids['left']:
-                left_pos = self.data.xpos[left_bid]
-                dist = np.linalg.norm(right_pos - left_pos)
-                min_distance = min(min_distance, dist)
+        for i in range(self.data.ncon):
+            contact = self.data.contact[i]
+            body1 = self.model.geom_bodyid[contact.geom1]
+            body2 = self.model.geom_bodyid[contact.geom2]
+
+            # Check if contact is between a right arm geom and a left arm geom
+            is_inter_arm = ((body1 in right_body_set and body2 in left_body_set) or
+                           (body1 in left_body_set and body2 in right_body_set))
+            is_arm_base = ((body1 in arm_body_set and body2 in base_body_set) or
+                           (body2 in arm_body_set and body1 in base_body_set))
+            if is_inter_arm or is_arm_base:
+                # contact.dist < 0 means penetration
+                min_distance = min(min_distance, contact.dist)
+
+        # If no inter-arm contacts found, arms are far apart
+        if min_distance == float('inf'):
+            min_distance = 1.0  # No contacts = safe
 
         collision_free = min_distance >= self.min_collision_distance
         return collision_free, min_distance
+
+    def _generate_trajectory_samples(self, start: np.ndarray, target: np.ndarray,
+                                     duration: float) -> list[np.ndarray]:
+        """Generate samples matching arm_controller_node interpolation timing/profile."""
+        if duration <= 0.0:
+            return [target.copy()]
+
+        # arm_controller_node updates at fixed control rate and uses cosine easing.
+        rate_hz = max(self.trajectory_check_rate_hz, 1.0)
+        dt = 1.0 / rate_hz
+        trajectory_time = 0.0
+        max_steps = int(np.ceil(duration * rate_hz)) + 2
+        samples = []
+
+        for _ in range(max_steps):
+            trajectory_time += dt
+            if trajectory_time >= duration:
+                samples.append(target.copy())
+                break
+
+            t = trajectory_time / duration
+            alpha = 0.5 * (1 - np.cos(np.pi * t))
+            samples.append(start + alpha * (target - start))
+
+        if not samples:
+            samples.append(target.copy())
+
+        return samples
+
+    def check_trajectory_collision(self, arm_name: str, start: np.ndarray,
+                                   target: np.ndarray, other_arm_positions: np.ndarray,
+                                   duration: float) -> tuple:
+        """Check collision along the full interpolated trajectory."""
+        samples = self._generate_trajectory_samples(start, target, duration)
+        min_distance = float('inf')
+
+        for idx, q in enumerate(samples):
+            if arm_name == 'right':
+                collision_free, dist = self.check_arm_collision(q, other_arm_positions)
+            else:
+                collision_free, dist = self.check_arm_collision(other_arm_positions, q)
+
+            min_distance = min(min_distance, dist)
+            if not collision_free:
+                return False, min_distance, idx + 1, len(samples)
+
+        return True, min_distance, 0, len(samples)
 
     def plan_to_target_callback(self, request, response):
         """Handle PlanToTarget service request."""
@@ -339,12 +553,13 @@ class MotionPlannerNode(Node):
             response.message = f"Invalid arm_name '{request.arm_name}'. Use 'right' or 'left'."
             return response
 
-        self.get_logger().info(f'Planning for {arm_name} arm...')
+        mode_str = 'pos+orient' if request.use_orientation else 'pos-only'
+        self.get_logger().info(f'Planning for {arm_name} arm ({mode_str})...')
 
         # Get current joint positions as seed
         seed = self.get_arm_joint_positions(arm_name)
         other_arm = 'left' if arm_name == 'right' else 'right'
-        other_arm_positions = self.get_arm_joint_positions(other_arm)
+        other_arm_positions = self.get_arm_joint_positions(other_arm, use_default_if_zero=False)
 
         # Convert target pose to SE3
         target_se3 = self.pose_to_se3(request.target_pose, request.use_orientation)
@@ -386,9 +601,28 @@ class MotionPlannerNode(Node):
             self.get_logger().warn(response.message)
             return response
 
+        # Check interpolated trajectory collision (matches arm_controller interpolation)
+        start_positions = self.get_arm_joint_positions(arm_name, use_default_if_zero=False)
+        traj_free, traj_min_dist, fail_step, total_steps = self.check_trajectory_collision(
+            arm_name, start_positions, solution, other_arm_positions, request.duration
+        )
+        if not traj_free:
+            response.success = False
+            response.message = (
+                f"Trajectory collision detected at step {fail_step}/{total_steps}: "
+                f"min distance={traj_min_dist:.3f}m < {self.min_collision_distance}m"
+            )
+            self.get_logger().warn(response.message)
+            return response
+
         # Planning succeeded
         response.success = True
-        response.message = f"Planning succeeded: pos_err={pos_error:.4f}m, cond={condition_number:.1f}, min_dist={min_dist:.3f}m"
+        msg = f"Planning succeeded: pos_err={pos_error:.4f}m"
+        if request.use_orientation:
+            msg += f", ori_err={ori_error:.4f}rad"
+        msg += (f", cond={condition_number:.1f}, end_min_dist={min_dist:.3f}m, "
+                f"traj_min_dist={traj_min_dist:.3f}m")
+        response.message = msg
         self.get_logger().info(response.message)
 
         # Execute if requested

@@ -267,7 +267,7 @@ sudo tailscale up
 
 **On Your Client Machine:**
 
-For **Linux**:
+For **Linux** or**Windows WSL**:
 ```bash
 # Install Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -298,15 +298,15 @@ Once both machines are connected to Tailscale:
    ```bash
    # On the robot
    tailscale ip -4
-   # Example output: 100.101.102.103
+   # Actual output: 100.106.67.118
    ```
 
 2. **Connect from your client using Tailscale IP:**
    ```bash
    # SSH via Tailscale (works from anywhere!)
-   ssh locobot@100.101.102.103
+   ssh locobot@100.106.67.118
 
-   # Or use the Tailscale machine name
+   # Or use the Tailscale machine name (may not work)
    ssh locobot@tidybot2-nuc
    ```
 
