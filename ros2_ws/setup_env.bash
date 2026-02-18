@@ -87,7 +87,12 @@ else
 fi
 
 export ROS_DOMAIN_ID=42 # domain id for the robot
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp # DDS implementation
+# Use CycloneDDS if available, otherwise fall back to FastRTPS
+if [ -f "/opt/ros/$ROS_DISTRO/lib/librmw_cyclonedds_cpp.so" ]; then
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+else
+    export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+fi
 echo "✓ Set ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
 echo "✓ Set RMW_IMPLEMENTATION=$RMW_IMPLEMENTATION"
 

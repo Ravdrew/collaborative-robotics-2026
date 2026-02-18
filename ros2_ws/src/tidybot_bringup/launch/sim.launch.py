@@ -69,9 +69,9 @@ def launch_setup(context, *args, **kwargs):
         output='screen',
         parameters=[{
             'model_path': model_path,
-            'sim_rate': 500.0,
+            'sim_rate': 200.0,
             'publish_rate': 100.0,
-            'camera_rate': 30.0,
+            'camera_rate': 0.5,
             'show_viewer': show_mujoco_viewer,
         }]
     )
