@@ -86,11 +86,12 @@ class AudioProcessingNode(Node):
         self.place_pub = self.create_publisher(String, self.place_topic, 10)
 
         # ---- Service client ----
-        self.mic_client = self.create_client(AudioRecord, self.record_service)
-        self.get_logger().info(f"Waiting for {self.record_service} ...")
-        if not self.mic_client.wait_for_service(timeout_sec=10.0):
-            raise RuntimeError(f"Service {self.record_service} not available")
-        self.get_logger().info("Microphone service connected.")
+        if not self.test_audio_path:
+            self.mic_client = self.create_client(AudioRecord, self.record_service)
+            self.get_logger().info(f"Waiting for {self.record_service} ...")
+            if not self.mic_client.wait_for_service(timeout_sec=10.0):
+                raise RuntimeError(f"Service {self.record_service} not available")
+            self.get_logger().info("Microphone service connected.")
 
         # ---- Google clients ----
         self.speech_client = speech.SpeechClient()
@@ -119,6 +120,44 @@ class AudioProcessingNode(Node):
 
         self.get_logger().info("Trigger received: audio_processing. Starting pipeline thread...")
         threading.Thread(target=self._run_pipeline, daemon=True).start()
+
+        # -------- WAV loading (for test_audio_path) --------
+    def _load_wav(self, path: str):
+        """
+        Load a WAV file and return (float_samples_list, sample_rate).
+
+        Supports:
+          - 16-bit PCM (int16) mono/stereo
+          - 32-bit float WAV mono/stereo
+
+        Stereo is downmixed to mono by averaging channels.
+        """
+        with wave.open(path, "rb") as wf:
+            n_channels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()   # bytes per sample
+            sample_rate = wf.getframerate()
+            n_frames = wf.getnframes()
+            raw = wf.readframes(n_frames)
+
+        if sampwidth == 2:
+            # int16 PCM
+            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        elif sampwidth == 4:
+            # Could be float32 WAV or int32 PCM. Most "float WAV" encoders store float32.
+            # We'll assume float32; if it's int32 PCM, values will be huge and we can detect.
+            audio = np.frombuffer(raw, dtype=np.float32)
+            # If it's actually int32 PCM misread as float32, numbers will be absurd; clamp later.
+        else:
+            raise RuntimeError(f"Unsupported WAV sample width: {sampwidth} bytes (need 2 or 4).")
+
+        # Reshape for channels and downmix if needed
+        if n_channels > 1:
+            audio = audio.reshape(-1, n_channels).mean(axis=1)
+
+        # Ensure in [-1, 1]
+        audio = np.clip(audio, -1.0, 1.0)
+
+        return audio.tolist(), int(sample_rate)
 
     # -------- Pipeline --------
     def _run_pipeline(self):
@@ -230,6 +269,7 @@ class AudioProcessingNode(Node):
     def _publish_targets(self, pick_target: str, place_target: str):
         pick_msg = String()
         pick_msg.data = pick_target
+        self.get_logger().info(f"Publishing pick_target='{pick_target}', place_target='{place_target}'")
         self.pick_pub.publish(pick_msg)
 
         place_msg = String()
