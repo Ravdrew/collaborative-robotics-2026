@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-<<<<<<< HEAD
-# Turtlebot code from ME274A
-
-from turtle import width
-import numpy as np
-import typing as T
-import rclpy                    # ROS2 client library
-from numpy import linalg
-from rclpy.node import Node     # ROS2 node baseclass
-from scipy.interpolate import splev, splrep
-import matplotlib.pyplot as plt
-
-from asl_tb3_lib.navigation import BaseNavigator
-from asl_tb3_lib.math_utils import wrap_angle
-from asl_tb3_lib.tf_utils import quaternion_to_yaw
-from asl_tb3_lib.navigation import TrajectoryPlan
-from asl_tb3_msgs.msg import TurtleBotControl, TurtleBotState
-from asl_tb3_lib.grids import snap_to_grid, StochOccupancyGrid2D
-=======
 # Navigation code (TidyBot2 A* trajectory tracking)
 
 import numpy as np
@@ -48,7 +29,6 @@ except Exception:
     # Provide a minimal snap_to_grid placeholder if needed by other code
     def snap_to_grid(x):
         return x
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
 
 class AStar(object):
     """Represents a motion planning problem to be solved using A*"""
@@ -280,11 +260,7 @@ class Navigator(BaseNavigator):
         self.kdx = kdx
         self.kdy = kdy
         self.V_max = V_max
-<<<<<<< HEAD
-        # self.om_max = om_max
-=======
         self.om_max = om_max
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
         self.V_PREV_THRES = 0.0001
     
     def reset(self) -> None:
@@ -294,30 +270,13 @@ class Navigator(BaseNavigator):
         self.om_prev = 0.0
         
     # override the compute_heading_control() method from BaseHeadingController
-<<<<<<< HEAD
-    def compute_heading_control(self, state: TurtleBotState, goal: TurtleBotState) -> TurtleBotControl:
-=======
     #change to tidybot control and state
     def compute_heading_control(self, state: Pose2D, goal: Pose2D) -> Twist:
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
         # compute the heading error
         heading_error = wrap_angle(goal.theta - state.theta)
 
         # required angular velocity
         angular_velocity = self.kp * heading_error
-<<<<<<< HEAD
-        # create a new TurtleBotControl message
-        control_msg = TurtleBotControl()
-        control_msg.omega = angular_velocity
-
-        return control_msg
-    
-    def compute_trajectory_tracking_control(self, state: TurtleBotState, plan: TrajectoryPlan, t: float) -> TurtleBotControl:
-        """ Compute control target using a trajectory tracking controller
-
-        Args:
-            state (TurtleBotState): current robot state
-=======
         # create a Twist message for angular velocity
         cmd = Twist()
         cmd.angular.z = float(angular_velocity)
@@ -328,26 +287,17 @@ class Navigator(BaseNavigator):
 
         Args:
             state (Pose2D): current robot state (x, y, theta)
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
             plan (TrajectoryPlan): planned trajectory
             t (float): current timestep
 
         Returns:
-<<<<<<< HEAD
-            TurtleBotControl: control command
-=======
             Twist: control command (linear velocity, angular velocity)
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
         """
 
         dt = t - self.t_prev
         traj = plan.desired_state(t)
 
-<<<<<<< HEAD
-        # I want to calculate the below values with scipy.interpolate.splev to sample from spline parameters given by TrajectoryPlan
-=======
         # Sample desired state and derivatives from spline parameters
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
         x_d = traj.x
         xd_d = splev(t, plan.path_x_spline, der=1)
         xdd_d = splev(t, plan.path_x_spline, der=2)
@@ -374,35 +324,15 @@ class Navigator(BaseNavigator):
         V = self.V_prev + a*dt
         ########## Code ends here ##########
 
-<<<<<<< HEAD
-        # apply control limits (NOTE NOT USED HERE)
-        # V = np.clip(V, -self.V_max, self.V_max)
-        # om = np.clip(om, -self.om_max, self.om_max)
-=======
         # apply control limits
         V = np.clip(V, -self.V_max, self.V_max)
         om = np.clip(om, -self.om_max, self.om_max)
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
 
         # save the commands that were applied and the time
         self.t_prev = t
         self.V_prev = V
         self.om_prev = om
 
-<<<<<<< HEAD
-        control = TurtleBotControl()
-        control.v = V
-        control.omega = om
-
-        return control
-
-    def compute_trajectory_plan(self, state: TurtleBotState, goal: TurtleBotState, occupancy: StochOccupancyGrid2D, resolution: float, horizon: float) -> T.Optional[TrajectoryPlan]:
-        """ Compute a trajectory plan using A* and cubic spline fitting
-        
-        Args:
-            state (TurtleBotState): state
-            goal (TurtleBotState): goal
-=======
         cmd = Twist()
         cmd.linear.x = float(V)
         cmd.angular.z = float(om)
@@ -414,7 +344,6 @@ class Navigator(BaseNavigator):
         Args:
             state (Pose2D): current robot state (x, y, theta)
             goal (Pose2D): goal state (x, y, theta)
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
             occupancy (StochOccupancyGrid2D): occupancy
             resolution (float): resolution
             horizon (float): horizon
@@ -457,13 +386,6 @@ class Navigator(BaseNavigator):
         
         return plan
 
-<<<<<<< HEAD
-if __name__ == "__main__":
-    rclpy.init()
-    node = Navigator()
-    rclpy.spin(node)
-    rclpy.shutdown()
-=======
 def main(argv=None):
     """Entry point for running the Navigator as a ROS2 node or a standalone demo."""
     if ROS_AVAILABLE:
@@ -519,4 +441,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
->>>>>>> c5ead26dd8a5c79e5854e20e0a929fce34fe2ff4
