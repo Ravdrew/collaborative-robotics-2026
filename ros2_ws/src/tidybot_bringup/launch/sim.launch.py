@@ -71,7 +71,7 @@ def launch_setup(context, *args, **kwargs):
             'model_path': model_path,
             'sim_rate': 500.0,
             'publish_rate': 100.0,
-            'camera_rate': 30.0,
+            'camera_rate': 0.01,
             'show_viewer': show_mujoco_viewer,
         }]
     )

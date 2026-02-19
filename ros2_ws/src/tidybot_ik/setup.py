@@ -20,6 +20,7 @@ setup(
         'console_scripts': [
             'motion_planner_node = tidybot_ik.motion_planner_node:main',
             'motion_planner_real_node = tidybot_ik.motion_planner_real_node:main',
+            'grasp_generation_node = tidybot_ik.grasp_generation_node:main',
         ],
     },
 )
