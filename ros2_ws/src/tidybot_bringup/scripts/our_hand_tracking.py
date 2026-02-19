@@ -11,7 +11,7 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 import mediapipe as mp
-import realsense as rs
+import pyrealsense2 as rs
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 
@@ -29,7 +29,7 @@ class HandPlaceTargetNode(Node):
 
         self.depth_sub = Subscriber(
             self, Image,
-            '/camera/depth/image_raw'
+            '/camera/realsense/aligned_depth_to_color/image_raw/image_raw'
         )
 
         self.sync = ApproximateTimeSynchronizer(
