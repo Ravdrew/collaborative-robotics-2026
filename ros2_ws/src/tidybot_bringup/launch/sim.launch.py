@@ -13,7 +13,7 @@ Usage:
     ros2 launch tidybot_bringup sim.launch.py show_mujoco_viewer:=false
     ros2 launch tidybot_bringup sim.launch.py scene:=our_scene_frontier_explore.xml
 """
-
+  
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction

@@ -4,7 +4,7 @@
 import rclpy  
 import scipy
 from rclpy.node import Node     
-from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
+#from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
 from asl_tb3_lib.math_utils import wrap_angle
 from asl_tb3_lib.tf_utils import quaternion_to_yaw
 from scipy.interpolate import splrep, splev
