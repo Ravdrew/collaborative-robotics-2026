@@ -16,6 +16,7 @@ Topics used:
 Usage:
     # Terminal 1: Start simulation
     ros2 launch tidybot_bringup sim.launch.py
+    ros2 launch tidybot_bringup sim.launch.py scene:=our_scene_frontier_explore.xml
 
     # Terminal 2: Run trajectory tracking with default gain (Kp=1.0)
     ros2 run tidybot_bringup our_trajectory_tracking.py
@@ -146,7 +147,7 @@ class TrajectoryTracker(Node):
         Callback for robot goal pose. Shows user what goal the robot is moving to.
         """
         self.goal = msg 
-        self.goal_activ = True
+        self.goal_active = True
         self.get_logger().info(f"Received goal: x={msg.x:.2f}, y={msg.y:.2f}, yaw={msg.theta:.2f}")
 
     def odom_callback(self, msg: Odometry):
