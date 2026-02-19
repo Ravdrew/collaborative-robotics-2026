@@ -11,7 +11,7 @@ Usage:
     ros2 launch tidybot_bringup sim.launch.py
     ros2 launch tidybot_bringup sim.launch.py use_rviz:=false
     ros2 launch tidybot_bringup sim.launch.py show_mujoco_viewer:=false
-    ros2 launch tidybot_bringup sim.launch.py scene:=scene_pickup.xml
+    ros2 launch tidybot_bringup sim.launch.py scene:=our_scene_frontier_explore.xml
 """
 
 import os
