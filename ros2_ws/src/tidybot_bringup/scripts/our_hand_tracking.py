@@ -29,7 +29,7 @@ class HandPlaceTargetNode(Node):
 
         self.depth_sub = Subscriber(
             self, Image,
-            '/camera/aligned_depth_to_color/image_raw'
+            '/camera/depth/image_raw'
         )
 
         self.sync = ApproximateTimeSynchronizer(
