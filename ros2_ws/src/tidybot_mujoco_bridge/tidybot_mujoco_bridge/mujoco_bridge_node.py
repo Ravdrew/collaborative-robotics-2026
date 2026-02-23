@@ -215,6 +215,7 @@ class MuJoCoBridgeNode(Node):
         self.rgb_pub = self.create_publisher(Image, '/camera/color/image_raw', qos)
         self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', qos)
         self.camera_info_pub = self.create_publisher(CameraInfo, '/camera/color/camera_info', qos)
+        self.depth_camera_info_pub = self.create_publisher(CameraInfo, '/camera/depth/camera_info', qos)
         self.goal_reached_pub = self.create_publisher(Bool, '/base/goal_reached', 10)
 
         # TF broadcaster
@@ -663,6 +664,21 @@ class MuJoCoBridgeNode(Node):
         camera_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         camera_info.p = [fx, 0.0, 320.0, 0.0, 0.0, fy, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
         self.camera_info_pub.publish(camera_info)
+
+        # Publish depth camera info (needed by depthimage_to_laserscan)
+        depth_camera_info = CameraInfo()
+        depth_camera_info.header.stamp = now
+        depth_camera_info.header.frame_id = 'camera_depth_optical_frame'
+        depth_camera_info.width = 640
+        depth_camera_info.height = 480
+        # D435 depth camera FOV is ~57 degrees vertical
+        depth_fy = 480 / (2 * np.tan(np.radians(57) / 2))
+        depth_fx = depth_fy  # Square pixels
+        depth_camera_info.k = [depth_fx, 0.0, 320.0, 0.0, depth_fy, 240.0, 0.0, 0.0, 1.0]
+        depth_camera_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+        depth_camera_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        depth_camera_info.p = [depth_fx, 0.0, 320.0, 0.0, 0.0, depth_fy, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        self.depth_camera_info_pub.publish(depth_camera_info)
 
     def destroy_node(self):
         """Clean up resources."""
