@@ -41,7 +41,7 @@ def generate_launch_description():
 
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time', default_value='false',
-        description='Use simulation clock')
+        description='Use simulation clock (requires /clock topic to be published)')
 
     declare_scan_source = DeclareLaunchArgument(
         'scan_source', default_value='depth',
