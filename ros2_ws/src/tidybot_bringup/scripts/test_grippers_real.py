@@ -81,29 +81,22 @@ class TestGrippers(Node):
         Args:
             side: 'right', 'left', or 'both'
             position: 0.0 (open) to 1.0 (closed)
-            duration: Time to hold the command (seconds)
+            duration: Time to wait for motion to complete (seconds)
         """
         msg = Float64MultiArray()
         msg.data = [float(position)]
 
-        # Publish for duration (reduced rate to avoid bus overload)
+        # One-shot command publish (wrapper now supports deferred one-shot mode switching).
+        if side in ('right', 'both') and self.right_connected:
+            self.right_gripper_pub.publish(msg)
+        if side in ('left', 'both') and self.left_connected:
+            self.left_gripper_pub.publish(msg)
+
+        # Wait for motion to complete while spinning callbacks.
         start = time.time()
         while (time.time() - start) < duration:
-            if side in ('right', 'both') and self.right_connected:
-                self.right_gripper_pub.publish(msg)
-            if side in ('left', 'both') and self.left_connected:
-                self.left_gripper_pub.publish(msg)
-            rclpy.spin_once(self, timeout_sec=0.02)
-            time.sleep(0.1)  # 10Hz instead of 20Hz
-
-        # Send stop command (0.5 maps to PWM=0 in wrapper)
-        stop_msg = Float64MultiArray()
-        stop_msg.data = [0.5]
-        if side in ('right', 'both') and self.right_connected:
-            self.right_gripper_pub.publish(stop_msg)
-        if side in ('left', 'both') and self.left_connected:
-            self.left_gripper_pub.publish(stop_msg)
-        rclpy.spin_once(self, timeout_sec=0.05)
+            rclpy.spin_once(self, timeout_sec=0.05)
+            time.sleep(0.05)
 
         # Report final positions
         if side in ('right', 'both') and self.right_gripper_pos is not None:
