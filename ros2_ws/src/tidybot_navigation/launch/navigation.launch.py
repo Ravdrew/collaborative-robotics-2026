@@ -63,6 +63,7 @@ def generate_launch_description():
             'range_min': 0.28,
             'range_max': 5.0,
             'scan_height': 100,      # rows around image center to consider
+            'output_frame': 'camera_depth_optical_frame',
         }],
         remappings=[
             ('depth', '/camera/depth/image_raw'),
