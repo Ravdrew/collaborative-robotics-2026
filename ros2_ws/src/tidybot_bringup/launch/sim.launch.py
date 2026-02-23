@@ -20,6 +20,7 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -47,7 +48,10 @@ def launch_setup(context, *args, **kwargs):
 
     # URDF from xacro
     urdf_path = PathJoinSubstitution([pkg_description, 'urdf', 'tidybot_wx250s.urdf.xacro'])
-    robot_description = Command(['xacro ', urdf_path])
+    robot_description = ParameterValue(
+        Command(['xacro ', urdf_path]),
+        value_type=str
+    )
 
     # Robot state publisher
     robot_state_publisher = Node(

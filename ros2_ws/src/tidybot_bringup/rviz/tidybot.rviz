@@ -24,6 +24,18 @@ Visualization Manager:
       Frame Timeout: 15
       Marker Scale: 0.3
 
+    - Class: rviz_default_plugins/LaserScan
+      Name: LaserScan
+      Enabled: true
+      Topic:
+        Value: /scan
+      Color: 255; 255; 255
+      Color Transformer: Intensity
+      Style: Flat Squares
+      Size (Pixels): 3
+      Size (m): 0.01
+      Use Fixed Frame: true
+
     - Class: rviz_default_plugins/Image
       Name: RGB Camera
       Enabled: true
