@@ -46,6 +46,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import Pose2D # for (x, y, orientation)
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Bool
 import numpy as np
 import time
 import csv
@@ -119,11 +120,18 @@ class TrajectoryTracker(Node):
 
         # ===========================
         # SUBSCRIBER TO NAVIGATION GOAL
-        self.goal_sub = self.create_subscription(Pose2D, '/nav_goal', self.goal_callback, 10)
+        # /cmd_nav is published by FrontierExplorer; /nav_goal is the legacy topic name.
+        # Subscribe to both so this node works with either source.
+        self.goal_sub = self.create_subscription(Pose2D, '/cmd_nav', self.goal_callback, 10)
+        self.goal_sub_legacy = self.create_subscription(Pose2D, '/nav_goal', self.goal_callback, 10)
 
         # ===========================
         # PUBLISHER FOR FINAL ROBOT POSE
         self.end_pose_pub = self.create_publisher(Pose2D, '/end_nav_pose', 10)
+
+        # ===========================
+        # PUBLISHER FOR NAV SUCCESS (consumed by FrontierExplorer)
+        self.nav_success_pub = self.create_publisher(Bool, '/nav_success', 10)
 
         # ===========================
         # GOAL AND TOLERANCE INITIALIZATION
@@ -200,6 +208,7 @@ class TrajectoryTracker(Node):
         if distance < self.goal_tolerance and abs(yaw_error) < self.yaw_tolerance:
             self.stop_robot()
             self.publish_final_pose()
+            self.nav_success_pub.publish(Bool(data=True))
             self.goal_active = False
             self.get_logger().info("Goal reached.")
             return

@@ -37,6 +37,16 @@ install(PROGRAMS
   scripts/diagnose_dynamixel.py
   scripts/example_state_machine.py
   scripts/trajectory_tracking.py
+  scripts/our_trajectory_tracking.py
+  scripts/our_astar_navigator.py
+  scripts/our_frontier_exploration.py
+  scripts/our_base_state_estimator.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+# Install asl_tb3_lib alongside the scripts so 'import asl_tb3_lib' resolves
+# when scripts are run via 'ros2 run tidybot_bringup ...'
+install(DIRECTORY scripts/asl_tb3_lib
   DESTINATION lib/${PROJECT_NAME}
 )
 

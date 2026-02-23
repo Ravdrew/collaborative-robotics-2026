@@ -65,6 +65,14 @@ fi
 export TIDYBOT_REPO_ROOT="$PROJECT_ROOT"
 echo "✓ Set TIDYBOT_REPO_ROOT=$PROJECT_ROOT"
 
+# 3.1. Add the navigation scripts directory so asl_tb3_lib is importable
+#      when running scripts directly (e.g. python3 scripts/our_frontier_exploration.py)
+SCRIPTS_DIR="$SCRIPT_DIR/src/tidybot_bringup/scripts"
+if [ -d "$SCRIPTS_DIR" ]; then
+    export PYTHONPATH="$SCRIPTS_DIR:$PYTHONPATH"
+    echo "✓ Added navigation scripts to PYTHONPATH"
+fi
+
 # 3.5. Set tidybot2 path for Phoenix 6 base controller
 export TIDYBOT2_PATH="/home/locobot/tidybot2"
 echo "✓ Set TIDYBOT2_PATH=$TIDYBOT2_PATH"
