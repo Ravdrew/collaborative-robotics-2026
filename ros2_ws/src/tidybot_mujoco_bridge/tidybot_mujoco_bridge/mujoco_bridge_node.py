@@ -660,6 +660,7 @@ class MuJoCoBridgeNode(Node):
         fy = 480 / (2 * np.tan(np.radians(42) / 2))
         fx = fy  # Square pixels
         camera_info.k = [fx, 0.0, 320.0, 0.0, fy, 240.0, 0.0, 0.0, 1.0]
+        camera_info.distortion_model = 'plumb_bob'
         camera_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
         camera_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         camera_info.p = [fx, 0.0, 320.0, 0.0, 0.0, fy, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
@@ -675,6 +676,7 @@ class MuJoCoBridgeNode(Node):
         depth_fy = 480 / (2 * np.tan(np.radians(57) / 2))
         depth_fx = depth_fy  # Square pixels
         depth_camera_info.k = [depth_fx, 0.0, 320.0, 0.0, depth_fy, 240.0, 0.0, 0.0, 1.0]
+        depth_camera_info.distortion_model = 'plumb_bob'
         depth_camera_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
         depth_camera_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         depth_camera_info.p = [depth_fx, 0.0, 320.0, 0.0, 0.0, depth_fy, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
