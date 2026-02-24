@@ -9,22 +9,40 @@ import matplotlib.pyplot as plt
 
 # Make ROS and ASL-specific imports optional so A* can be tested standalone
 try:
+    import time
+    import math
     import rclpy                    # ROS2 client library
     from rclpy.node import Node     # ROS2 node baseclass
     from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
     from asl_tb3_lib.math_utils import wrap_angle # robot-agnostic
     from asl_tb3_lib.tf_utils import quaternion_to_yaw # robot-agnostic
     from geometry_msgs.msg import Pose2D, Twist
+    from nav_msgs.msg import Odometry, OccupancyGrid
+    from std_msgs.msg import Bool
     from asl_tb3_lib.grids import snap_to_grid, StochOccupancyGrid2D # robot-agnostic
     ROS_AVAILABLE = True
 except Exception:
     # If ROS or ASL libraries are not present, allow importing AStar for testing
+    import time
+    import math
     ROS_AVAILABLE = False
-    Node = object
-    BaseNavigator = object
+
+    # Distinct dummy base classes so `class Navigator(Node, BaseNavigator)` is valid
+    class Node:  # type: ignore[no-redef]
+        pass
+
+    class BaseNavigator:  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            self.t_prev = 0.0
+            self.V_prev = 0.0
+            self.om_prev = 0.0
+
     TrajectoryPlan = None
     Pose2D = None
     Twist = None
+    Odometry = None
+    OccupancyGrid = None
+    Bool = None
     StochOccupancyGrid2D = None
     # Provide a minimal snap_to_grid placeholder if needed by other code
     def snap_to_grid(x):
@@ -247,11 +265,11 @@ class AStar(object):
         ########## Code ends here ##########
 
 #----------------------------------------------------------------------------------------------------------
-class Navigator(BaseNavigator):
+class Navigator(Node, BaseNavigator):
     def __init__(self, kpx: float = 6.0, kpy: float = 6.0, kdx: float = 3.0, kdy: float = 3.0,
                  V_max: float = 0.5, om_max: float = 1.0) -> None:
-        # call the parent's init method
-        super().__init__()
+        Node.__init__(self, 'astar_navigator')
+        BaseNavigator.__init__(self)
         # set the proportional control gain
         self.kp = 2.0
         # set the constants for trajectory tracking
@@ -262,7 +280,30 @@ class Navigator(BaseNavigator):
         self.V_max = V_max
         self.om_max = om_max
         self.V_PREV_THRES = 0.0001
-    
+
+        # Subscriptions
+        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.goal_sub = self.create_subscription(Pose2D, '/cmd_nav', self.goal_callback, 10)
+        self.goal_sub_legacy = self.create_subscription(Pose2D, '/nav_goal', self.goal_callback, 10)
+        self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 10)
+
+        # Publishers
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.end_pose_pub = self.create_publisher(Pose2D, '/end_nav_pose', 10)
+        self.nav_success_pub = self.create_publisher(Bool, '/nav_success', 10)
+
+        # Internal state
+        self.current_state = None
+        self.occupancy = None
+        self.current_plan = None
+        self.plan_start_time = None
+        self.plan_active = False
+        self.goal_tolerance = 0.05    # metres
+        self.yaw_tolerance  = 0.05    # radians
+
+        self.create_timer(0.02, self.control_loop)
+        self.get_logger().info('A* Navigator ready')
+
     def reset(self) -> None:
         """ Reset internal variables for trajectory tracking controller """
         self.t_prev = 0.0
@@ -295,14 +336,13 @@ class Navigator(BaseNavigator):
         """
 
         dt = t - self.t_prev
-        traj = plan.desired_state(t)
 
         # Sample desired state and derivatives from spline parameters
-        x_d = traj.x
-        xd_d = splev(t, plan.path_x_spline, der=1)
+        x_d   = splev(t, plan.path_x_spline, der=0)
+        xd_d  = splev(t, plan.path_x_spline, der=1)
         xdd_d = splev(t, plan.path_x_spline, der=2)
-        y_d = traj.y
-        yd_d = splev(t, plan.path_y_spline, der=1)
+        y_d   = splev(t, plan.path_y_spline, der=0)
+        yd_d  = splev(t, plan.path_y_spline, der=1)
         ydd_d = splev(t, plan.path_y_spline, der=2)
 
         ########## Code starts here ##########
@@ -385,6 +425,65 @@ class Navigator(BaseNavigator):
         )
         
         return plan
+
+    def odom_callback(self, msg: Odometry) -> None:
+        """Extract robot pose from odometry (matches TrajectoryTracker convention)."""
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        q = msg.pose.pose.orientation
+        theta = 2.0 * math.atan2(q.z, q.w) - math.pi / 2
+        self.current_state = Pose2D(x=float(x), y=float(y), theta=float(theta))
+
+    def map_callback(self, msg: OccupancyGrid) -> None:
+        """Convert ROS2 OccupancyGrid to StochOccupancyGrid2D for A* planning."""
+        self.occupancy = StochOccupancyGrid2D(
+            resolution=msg.info.resolution,
+            size_xy=np.array([msg.info.width, msg.info.height]),
+            origin_xy=np.array([msg.info.origin.position.x, msg.info.origin.position.y]),
+            window_size=3,
+            probs=msg.data,
+        )
+
+    def goal_callback(self, msg: Pose2D) -> None:
+        """Receive a navigation goal, run A*, and start trajectory tracking."""
+        if self.current_state is None or self.occupancy is None:
+            self.get_logger().warn('Goal received but state/map not yet available')
+            return
+        self.current_plan = self.compute_trajectory_plan(
+            self.current_state, msg, self.occupancy,
+            resolution=0.1, horizon=10.0,
+        )
+        if self.current_plan:
+            self.plan_start_time = time.time()
+            self.plan_active = True
+            self.get_logger().info(f'A* plan computed ({len(self.current_plan.path)} waypoints)')
+        else:
+            self.get_logger().warn('A* failed to find a path to goal')
+
+    def control_loop(self) -> None:
+        """50 Hz control loop: track the current trajectory plan."""
+        if not self.plan_active or self.current_state is None:
+            return
+        t = time.time() - self.plan_start_time
+        if t > self.current_plan.duration:
+            self._finish_goal()
+            return
+        cmd = self.compute_trajectory_tracking_control(self.current_state, self.current_plan, t)
+        self.cmd_vel_pub.publish(cmd)
+
+    def _finish_goal(self) -> None:
+        """Stop the robot and signal success to FrontierExplorer."""
+        self.cmd_vel_pub.publish(Twist())
+        pose = Pose2D(
+            x=self.current_state.x,
+            y=self.current_state.y,
+            theta=self.current_state.theta,
+        )
+        self.end_pose_pub.publish(pose)
+        self.nav_success_pub.publish(Bool(data=True))
+        self.plan_active = False
+        self.get_logger().info('Goal reached')
+
 
 def main(argv=None):
     """Entry point for running the Navigator as a ROS2 node or a standalone demo."""
