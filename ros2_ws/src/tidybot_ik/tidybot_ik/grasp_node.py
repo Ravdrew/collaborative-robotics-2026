@@ -44,6 +44,17 @@ Usage:
     ros2 topic pub --once /pick_target_local geometry_msgs/msg/Pose \\
         "{position: {x: 0.0, y: 0.3, z: 0.5}, orientation: {w: 1.0}}"
 
+    # Optional - just motion planning service call
+    ros2 service call /plan_to_target tidybot_msgs/srv/PlanToTarget   "{arm_name: 'right',
+        target_pose: {
+        position: {x: 0.1, y: -0.35, z: 0.1},
+        orientation: {w: 0.5, x: 0.5, y: 0.5, z: -0.5}
+        },
+        use_orientation: true,
+        execute: true,
+        duration: 2.0,
+        max_condition_number: 100.0}"
+
     # Terminal 3 - watch result
     ros2 topic echo /grasp_completed
 """
