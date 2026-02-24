@@ -29,6 +29,11 @@ RUN apt-get update && apt-get install -y \
     ros-humble-rviz2 \
     ros-humble-rosidl-typesupport-c \
     ros-humble-rosidl-typesupport-cpp \
+    ros-humble-slam-toolbox \
+    ros-humble-depthimage-to-laserscan \
+    ros-humble-nav2-map-server \
+    ros-humble-dynamixel-sdk \
+    libyaml-cpp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
@@ -117,6 +122,16 @@ RUN echo '#!/bin/bash' > /usr/local/bin/tidybot-test-base && \
     echo 'ros2 run tidybot_bringup test_base_sim.py' >> /usr/local/bin/tidybot-test-base && \
     chmod +x /usr/local/bin/tidybot-test-base
 
+# Frontier exploration launcher
+RUN echo '#!/bin/bash' > /usr/local/bin/tidybot-explore && \
+    echo 'source /opt/ros/humble/setup.bash' >> /usr/local/bin/tidybot-explore && \
+    echo 'source /opt/tidybot2/ros2_ws/install/setup.bash' >> /usr/local/bin/tidybot-explore && \
+    echo 'export TIDYBOT_REPO_ROOT=/opt/tidybot2' >> /usr/local/bin/tidybot-explore && \
+    echo 'export PYTHONPATH="/opt/tidybot2/.venv/lib/python3.10/site-packages:/opt/tidybot2/ros2_ws/install/tidybot_bringup/lib/tidybot_bringup:$PYTHONPATH"' >> /usr/local/bin/tidybot-explore && \
+    echo 'cd /opt/tidybot2/ros2_ws' >> /usr/local/bin/tidybot-explore && \
+    echo 'ros2 launch tidybot_bringup nav_exploration.launch.py' >> /usr/local/bin/tidybot-explore && \
+    chmod +x /usr/local/bin/tidybot-explore
+
 RUN echo '#!/bin/bash' > /usr/local/bin/tidybot-test-arms && \
     echo 'source /opt/ros/humble/setup.bash' >> /usr/local/bin/tidybot-test-arms && \
     echo 'source /opt/tidybot2/ros2_ws/install/setup.bash' >> /usr/local/bin/tidybot-test-arms && \
@@ -179,6 +194,7 @@ RUN echo "" >> /etc/bash.bashrc && \
     echo 'echo "Test scripts (run in 2nd terminal):"' >> /etc/bash.bashrc && \
     echo 'echo "  tidybot-test-base    - Test base movement"' >> /etc/bash.bashrc && \
     echo 'echo "  tidybot-test-arms    - Test arm control"' >> /etc/bash.bashrc && \
+    echo 'echo "  tidybot-explore      - Frontier exploration (full nav stack)"' >> /etc/bash.bashrc && \
     echo 'echo "=========================================="' >> /etc/bash.bashrc && \
     echo 'echo ""' >> /etc/bash.bashrc
 
