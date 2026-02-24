@@ -216,6 +216,8 @@ class MuJoCoBridgeNode(Node):
         self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', qos)
         self.camera_info_pub = self.create_publisher(CameraInfo, '/camera/color/camera_info', qos)
         self.depth_camera_info_pub = self.create_publisher(CameraInfo, '/camera/depth/camera_info', qos)
+        self.depth_nav_pub = self.create_publisher(Image, '/camera/depth/image_nav', qos)
+        self.depth_nav_info_pub = self.create_publisher(CameraInfo, '/camera/depth/camera_info_nav', qos)
         self.goal_reached_pub = self.create_publisher(Bool, '/base/goal_reached', 10)
 
         # TF broadcaster
@@ -625,10 +627,12 @@ class MuJoCoBridgeNode(Node):
             # Render depth image
             self.renderer.update_scene(self.data, camera='d435_depth')
             self.renderer.enable_depth_rendering()
-            depth_image = self.renderer.render()
+            depth_image_raw = self.renderer.render()
             self.renderer.disable_depth_rendering()
-            # Flip vertically and horizontally to match ROS camera convention
-            depth_image = np.fliplr(np.flipud(depth_image)).copy()
+            # Keep un-flipped copy for navigation (correct geometry for depthimage_to_laserscan)
+            depth_image_nav = depth_image_raw.copy()
+            # Flip vertically and horizontally to match ROS camera convention for display
+            depth_image = np.fliplr(np.flipud(depth_image_raw)).copy()
 
         # Publish RGB image
         try:
@@ -681,6 +685,31 @@ class MuJoCoBridgeNode(Node):
         depth_camera_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         depth_camera_info.p = [depth_fx, 0.0, 320.0, 0.0, 0.0, depth_fy, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
         self.depth_camera_info_pub.publish(depth_camera_info)
+
+        # Publish un-flipped depth image for navigation (correct geometry in camera_link frame)
+        try:
+            depth_nav_mm = (depth_image_nav * 1000).astype(np.uint16)
+            depth_nav_msg = self.cv_bridge.cv2_to_imgmsg(depth_nav_mm, encoding='16UC1')
+            depth_nav_msg.header.stamp = now
+            depth_nav_msg.header.frame_id = 'camera_link'
+            self.depth_nav_pub.publish(depth_nav_msg)
+        except Exception as e:
+            self.get_logger().warn(f'Failed to publish nav depth image: {e}')
+
+        # Publish nav depth camera info (in camera_link frame)
+        nav_info = CameraInfo()
+        nav_info.header.stamp = now
+        nav_info.header.frame_id = 'camera_link'
+        nav_info.width = 640
+        nav_info.height = 480
+        depth_fy_nav = 480 / (2 * np.tan(np.radians(57) / 2))
+        depth_fx_nav = depth_fy_nav
+        nav_info.k = [depth_fx_nav, 0.0, 320.0, 0.0, depth_fy_nav, 240.0, 0.0, 0.0, 1.0]
+        nav_info.distortion_model = 'plumb_bob'
+        nav_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+        nav_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        nav_info.p = [depth_fx_nav, 0.0, 320.0, 0.0, 0.0, depth_fy_nav, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        self.depth_nav_info_pub.publish(nav_info)
 
     def destroy_node(self):
         """Clean up resources."""
