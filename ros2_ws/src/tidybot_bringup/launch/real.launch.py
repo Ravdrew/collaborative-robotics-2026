@@ -9,6 +9,8 @@ Launches:
 - Robot state publisher (URDF + TF)
 - Image compression (optional, for remote clients)
 - Arm/gripper wrappers for sim-compatible topics (optional, on by default)
+- Grasp generation node (camera pose -> EEF pose, optional)
+- Grasp execution node (full grasp sequence state machine, optional)
 - RViz (optional)
 
 Hardware Setup (Dual U2D2):
@@ -21,6 +23,7 @@ Usage:
     ros2 launch tidybot_bringup real.launch.py use_base:=false  # Disable base
     ros2 launch tidybot_bringup real.launch.py use_left_arm:=false  # Right arm only
     ros2 launch tidybot_bringup real.launch.py use_sim_topics:=false  # Disable sim-compatible topics
+    ros2 launch tidybot_bringup real.launch.py use_grasp_nodes:=false  # Disable grasp nodes
 
 Sim-to-Real Topic Compatibility (use_sim_topics:=true, default):
     When enabled, the following simulation-compatible topics are available:
@@ -70,6 +73,7 @@ def launch_setup(context, *args, **kwargs):
     use_microphone = LaunchConfiguration('use_microphone').perform(context) == 'true'
     use_sim_topics = LaunchConfiguration('use_sim_topics').perform(context) == 'true'
     load_configs = LaunchConfiguration('load_configs').perform(context) == 'true'
+    use_grasp_nodes = LaunchConfiguration('use_grasp_nodes').perform(context) == 'true'
 
     # Get project root for uv packages
     tidybot2_path = os.environ.get('TIDYBOT2_PATH', '/home/locobot/tidybot2')
@@ -318,6 +322,22 @@ def launch_setup(context, *args, **kwargs):
             }]
         ))
 
+    # Grasp generation node (camera pose -> EEF pose in base_link)
+    # Grasp execution node (full pick sequence state machine)
+    if use_grasp_nodes:
+        nodes.append(Node(
+            package='tidybot_ik',
+            executable='grasp_generation_node',
+            name='grasp_generation',
+            output='screen',
+        ))
+        nodes.append(Node(
+            package='tidybot_ik',
+            executable='grasp_node',
+            name='grasp_node',
+            output='screen',
+        ))
+
     # Microphone recording node
     if use_microphone:
         nodes.append(Node(
@@ -397,6 +417,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'load_configs', default_value='true',
             description='Load motor configs from YAML files'
+        ),
+        DeclareLaunchArgument(
+            'use_grasp_nodes', default_value='true',
+            description='Launch grasp_generation_node and grasp_node'
         ),
 
         # Setup function handles conditional node creation

@@ -63,7 +63,7 @@ def main():
 
     # Get block position from simulation
     block_pos = data.xpos[block_body_id].copy()
-    print(f"Block position: {block_pos}")
+    print(f"Block position: {block_pos}") # [ 0.55  -0.15   0.025]
 
     # ==========================================================================
     # Setup Mink IK
