@@ -6,7 +6,7 @@ It starts depthimage_to_laserscan, SLAM Toolbox, and the full Nav2 stack.
 
 Usage:
   # Simulation (on top of sim.launch.py)
-  ros2 launch tidybot_navigation navigation.launch.py use_sim_time:=true
+  ros2 launch tidybot_navigation navigation.launch.py sim:=true
 
   # Real hardware with depth camera (on top of real.launch.py)
   ros2 launch tidybot_navigation navigation.launch.py
@@ -23,33 +23,31 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def generate_launch_description():
+def launch_setup(context, *args, **kwargs):
     pkg_dir = get_package_share_directory('tidybot_navigation')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
 
-    # Launch arguments
     use_sim_time = LaunchConfiguration('use_sim_time')
-    scan_source = LaunchConfiguration('scan_source')
     use_rviz = LaunchConfiguration('use_rviz')
+    is_sim = LaunchConfiguration('sim').perform(context) == 'true'
 
-    declare_use_sim_time = DeclareLaunchArgument(
-        'use_sim_time', default_value='false',
-        description='Use simulation clock (requires /clock topic to be published)')
-
-    declare_scan_source = DeclareLaunchArgument(
-        'scan_source', default_value='depth',
-        description='Scan source: "depth" uses depthimage_to_laserscan, "lidar" assumes /scan is published externally')
-
-    declare_use_rviz = DeclareLaunchArgument(
-        'use_rviz', default_value='true',
-        description='Launch RViz with navigation config')
+    # In simulation, use un-flipped depth on nav topics (camera_link frame)
+    # On real hardware, use standard RealSense topics (optical frame is fine)
+    if is_sim:
+        depth_topic = '/camera/depth/image_nav'
+        depth_info_topic = '/camera/depth/camera_info_nav'
+        scan_output_frame = 'camera_link'
+    else:
+        depth_topic = '/camera/depth/image_raw'
+        depth_info_topic = '/camera/depth/camera_info'
+        scan_output_frame = 'camera_depth_optical_frame'
 
     # depthimage_to_laserscan — only when scan_source:=depth
     depth_to_scan_node = Node(
@@ -62,12 +60,12 @@ def generate_launch_description():
             'scan_time': 0.033,
             'range_min': 0.28,
             'range_max': 5.0,
-            'scan_height': 100,      # rows around image center to consider
-            'output_frame': 'camera_link',
+            'scan_height': 100,
+            'output_frame': scan_output_frame,
         }],
         remappings=[
-            ('depth', '/camera/depth/image_nav'),
-            ('depth_camera_info', '/camera/depth/camera_info_nav'),
+            ('depth', depth_topic),
+            ('depth_camera_info', depth_info_topic),
             ('scan', '/scan'),
         ],
     )
@@ -105,12 +103,27 @@ def generate_launch_description():
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
-    return LaunchDescription([
-        declare_use_sim_time,
-        declare_scan_source,
-        declare_use_rviz,
+    return [
         depth_to_scan_node,
         slam_toolbox_node,
         nav2_bringup,
         rviz_node,
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument(
+            'use_sim_time', default_value='false',
+            description='Use simulation clock (requires /clock topic)'),
+        DeclareLaunchArgument(
+            'sim', default_value='false',
+            description='Running in simulation (uses nav depth topics with correct geometry)'),
+        DeclareLaunchArgument(
+            'scan_source', default_value='depth',
+            description='"depth" uses depthimage_to_laserscan, "lidar" assumes /scan published externally'),
+        DeclareLaunchArgument(
+            'use_rviz', default_value='true',
+            description='Launch RViz with navigation config'),
+        OpaqueFunction(function=launch_setup),
     ])
