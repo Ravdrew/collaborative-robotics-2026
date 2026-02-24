@@ -629,8 +629,9 @@ class MuJoCoBridgeNode(Node):
             self.renderer.enable_depth_rendering()
             depth_image_raw = self.renderer.render()
             self.renderer.disable_depth_rendering()
-            # Keep un-flipped copy for navigation (correct geometry for depthimage_to_laserscan)
-            depth_image_nav = depth_image_raw.copy()
+            # For navigation: only flip horizontally (corrects left-right mirror from MuJoCo camera quaternion)
+            # but NOT vertically (keeps scan in horizontal plane for camera_link frame)
+            depth_image_nav = np.fliplr(depth_image_raw).copy()
             # Flip vertically and horizontally to match ROS camera convention for display
             depth_image = np.fliplr(np.flipud(depth_image_raw)).copy()
 
