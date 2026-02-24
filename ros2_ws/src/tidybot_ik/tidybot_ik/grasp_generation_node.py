@@ -55,10 +55,14 @@ import tf2_geometry_msgs  # noqa: F401 — registers transform functions
 # along -Z (straight down).  This matches ORIENT_FINGERS_DOWN in
 # test_planner_sim.py.
 # ---------------------------------------------------------------------------
-_FINGERS_DOWN_QW = 0.5
-_FINGERS_DOWN_QX = 0.5
-_FINGERS_DOWN_QY = 0.5
-_FINGERS_DOWN_QZ = -0.5
+_FINGERS_DOWN_HORIZONTAL_QW = 0.5
+_FINGERS_DOWN_HORIZONTAL_QX = 0.5
+_FINGERS_DOWN_HORIZONTAL_QY = 0.5
+_FINGERS_DOWN_HORIZONTAL_QZ = -0.5
+_FINGERS_DOWN_VERTICAL_QW = 0.707107
+_FINGERS_DOWN_VERTICAL_QX = 0.0
+_FINGERS_DOWN_VERTICAL_QY = 0.707107
+_FINGERS_DOWN_VERTICAL_QZ = 0.0
 
 
 class GraspGenerationNode(Node):
@@ -148,10 +152,16 @@ class GraspGenerationNode(Node):
         eef_pose.position.x = pose_in_robot.pose.position.x
         eef_pose.position.y = pose_in_robot.pose.position.y
         eef_pose.position.z = pose_in_robot.pose.position.z + self.grasp_height_offset
-        eef_pose.orientation.w = _FINGERS_DOWN_QW
-        eef_pose.orientation.x = _FINGERS_DOWN_QX
-        eef_pose.orientation.y = _FINGERS_DOWN_QY
-        eef_pose.orientation.z = _FINGERS_DOWN_QZ
+        if msg.orientation.w == 1.0:
+            eef_pose.orientation.w = _FINGERS_DOWN_HORIZONTAL_QW
+            eef_pose.orientation.x = _FINGERS_DOWN_HORIZONTAL_QX
+            eef_pose.orientation.y = _FINGERS_DOWN_HORIZONTAL_QY
+            eef_pose.orientation.z = _FINGERS_DOWN_HORIZONTAL_QZ
+        else:
+            eef_pose.orientation.w = _FINGERS_DOWN_VERTICAL_QW
+            eef_pose.orientation.x = _FINGERS_DOWN_VERTICAL_QX
+            eef_pose.orientation.y = _FINGERS_DOWN_VERTICAL_QY
+            eef_pose.orientation.z = _FINGERS_DOWN_VERTICAL_QZ
 
         self._pub.publish(eef_pose)
 
