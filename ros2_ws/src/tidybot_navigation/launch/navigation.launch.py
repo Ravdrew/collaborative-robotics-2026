@@ -39,15 +39,16 @@ def launch_setup(context, *args, **kwargs):
     is_sim = LaunchConfiguration('sim').perform(context) == 'true'
 
     # In simulation, use un-flipped depth on nav topics (camera_link frame)
-    # On real hardware, use standard RealSense topics (optical frame is fine)
+    # On real hardware, use standard RealSense topics
+    # Both use camera_link as output frame — it's always in TF (from URDF)
+    # and has the correct orientation for 2D SLAM (X-forward, Y-left, Z-up)
     if is_sim:
         depth_topic = '/camera/depth/image_nav'
         depth_info_topic = '/camera/depth/camera_info_nav'
-        scan_output_frame = 'camera_link'
     else:
         depth_topic = '/camera/depth/image_raw'
         depth_info_topic = '/camera/depth/camera_info'
-        scan_output_frame = 'camera_depth_optical_frame'
+    scan_output_frame = 'camera_link'
 
     # depthimage_to_laserscan — only when scan_source:=depth
     depth_to_scan_node = Node(
