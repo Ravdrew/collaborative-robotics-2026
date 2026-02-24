@@ -52,6 +52,7 @@ class StateMachineNode(Node):
         # ---- Params (easy to remap) ----
         self.declare_parameter("state_topic", "/state_machine")
         self.declare_parameter("state_pub_hz", 5.0)
+        self.declare_parameter("start_state", "")
 
         self.declare_parameter("pick_target_topic", "/pick_target")
         self.declare_parameter("place_target_topic", "/place_target")
@@ -63,7 +64,29 @@ class StateMachineNode(Node):
         self.declare_parameter("placing_done_topic", "/placing_done")
 
         # ---- State ----
+        # Default state
         self.state: SMState = SMState.AUDIO_PROCESSING
+
+        # Optional override
+        start_state_param = (
+            self.get_parameter("start_state")
+            .get_parameter_value()
+            .string_value
+            .strip()
+        )
+
+        if start_state_param:
+            try:
+                self.state = SMState(start_state_param)
+                self.get_logger().warn(
+                    f"⚠ Starting in OVERRIDE state: {self.state.value}"
+                )
+            except ValueError:
+                self.get_logger().error(
+                    f"Invalid start_state '{start_state_param}'. "
+                    f"Must be one of {[s.value for s in SMState]}"
+                ) 
+
         self.pick_target_ok = False
         self.place_target_ok = False
 
