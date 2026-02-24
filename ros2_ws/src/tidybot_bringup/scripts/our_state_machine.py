@@ -7,7 +7,7 @@ States (in order):
    - waits until /pick_target (String) AND /place_target (String) are received (non-empty)
 
 2) pick_navigation
-   - transitions when /pick_target_global (PointStamped) is received
+   - transitions when /pick_target_local (PointStamped) is received
 
 3) picking
    - transitions when /successful_pick (Bool) is received
@@ -56,7 +56,7 @@ class StateMachineNode(Node):
         self.declare_parameter("pick_target_topic", "/pick_target")
         self.declare_parameter("place_target_topic", "/place_target")
 
-        self.declare_parameter("pick_target_global_topic", "/pick_target_global")
+        self.declare_parameter("pick_target_local_topic", "/pick_target_local")
         self.declare_parameter("successful_pick_topic", "/successful_pick")
 
         self.declare_parameter("place_target_local_topic", "/place_target_local")
@@ -88,8 +88,8 @@ class StateMachineNode(Node):
 
         self.create_subscription(
             PointStamped,
-            self.get_parameter("pick_target_global_topic").get_parameter_value().string_value,
-            self._on_pick_target_global,
+            self.get_parameter("pick_target_local_topic").get_parameter_value().string_value,
+            self._on_pick_target_local,
             10,
         )
 
@@ -135,7 +135,7 @@ class StateMachineNode(Node):
             self.place_target_ok = True
             self._maybe_finish_audio()
 
-    def _on_pick_target_global(self, _msg: PointStamped):
+    def _on_pick_target_local(self, _msg: PointStamped):
         if self.state == SMState.PICK_NAVIGATION:
             self._transition(SMState.PICKING)
 
