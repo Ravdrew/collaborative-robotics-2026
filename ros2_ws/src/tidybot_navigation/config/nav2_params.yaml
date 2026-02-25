@@ -54,7 +54,7 @@ controller_server:
       transform_tolerance: 0.1
       temperature: 0.3
       gamma: 0.015
-      motion_model: "Omni"
+      motion_model: "Omni" 
       visualize: false
       reset_period: 1.0
       regenerate_noises: false
@@ -129,7 +129,7 @@ planner_server:
       tolerance: 0.25
       downsample_costmap: false
       downsampling_factor: 1
-      allow_unknown: true
+      allow_unknown: true #Claude suggested we might want to set this to false? This currently allows for planning on unknown spaces 
       max_iterations: 1000000
       max_on_approach_iterations: 1000
       max_planning_time: 5.0
@@ -213,6 +213,7 @@ local_costmap:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
         observation_sources: scan
+        footprint_clearing_enabled: true #add this to make sure we are in bounds when we initialize
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -249,6 +250,7 @@ global_costmap:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: true
         observation_sources: scan
+        footprint_clearing_enabled: true #add this to check initalization issues with being out of bounds
         scan:
           topic: /scan
           max_obstacle_height: 2.0
