@@ -216,7 +216,6 @@ local_costmap:
         enabled: true
         footprint_clearing_enabled: true
         observation_sources: scan
-        footprint_clearing_enabled: true #add this to make sure we are in bounds when we initialize
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -256,7 +255,6 @@ global_costmap:
         enabled: true
         footprint_clearing_enabled: true
         observation_sources: scan
-        footprint_clearing_enabled: true #add this to check initalization issues with being out of bounds
         scan:
           topic: /scan
           max_obstacle_height: 2.0
