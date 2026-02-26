@@ -120,7 +120,7 @@ def launch_setup(context, *args, **kwargs):
     # tag_localization_node = Node(
     # package='tidybot_navigation',
     # executable='tag_global_pose_node',
-    # name='tag_global_pose',
+    # name='tag_global_pose_node',
     # parameters=[os.path.join(pkg_dir, 'config', 'tag_locations.yaml')],
     # )
 
