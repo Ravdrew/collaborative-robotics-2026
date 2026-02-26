@@ -103,11 +103,24 @@ def launch_setup(context, *args, **kwargs):
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
+    # Startup clearing scan: publishes one synthetic 360° LaserScan on /scan
+    # to seed SLAM Toolbox's map and the Nav2 costmap with FREE space around
+    # the robot footprint. Fixes the blind-spot initialization problem caused
+    # by the forward-facing D435 camera. The node self-terminates after one publish.
+    startup_clear_scan_node = Node(
+        package='tidybot_navigation',
+        executable='startup_clear_scan.py',
+        name='startup_clear_scan',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
+    )
+
     return [
         depth_to_scan_node,
         slam_toolbox_node,
         nav2_bringup,
         rviz_node,
+        startup_clear_scan_node,
     ]
 
 

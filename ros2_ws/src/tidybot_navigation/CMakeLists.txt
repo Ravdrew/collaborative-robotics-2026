@@ -18,4 +18,10 @@ install(DIRECTORY rviz/
   DESTINATION share/${PROJECT_NAME}/rviz
 )
 
+# Install Python scripts
+install(PROGRAMS
+  scripts/startup_clear_scan.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
