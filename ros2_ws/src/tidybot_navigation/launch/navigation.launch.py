@@ -103,11 +103,47 @@ def launch_setup(context, *args, **kwargs):
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
+    # # AprilTag parameters, from apriltag_ros
+    # apriltag_node = Node(
+    # package='apriltag_ros',
+    # executable='apriltag_node',
+    # name='apriltag_detector',
+    # parameters=[{
+    #     'image_transport': 'raw',
+    #     'family': 'tag36h11',
+    #     'size': 0.162,   # <-- tag size
+    # }],
+    # remappings=[('image_rect', '/camera/color/image_raw'),('camera_info', '/camera/color/camera_info'),],
+    # )
+
+    # # our personal tag localization node
+    # tag_localization_node = Node(
+    # package='tidybot_navigation',
+    # executable='tag_global_pose_node',
+    # name='tag_global_pose',
+    # parameters=[os.path.join(pkg_dir, 'config', 'tag_locations.yaml')],
+    # )
+
+    # # EKF to smoothly integrate the global strapdown from the apriltags to the continuous slam happening
+    # ekf_node = Node(
+    # package='robot_localization',
+    # executable='ekf_node',
+    # name='ekf_filter_node',
+    # output='screen',
+    # parameters=[
+    #     os.path.join(pkg_dir, 'config', 'ekf_localization.yaml'),
+    #     {'use_sim_time': use_sim_time},
+    # ],
+    # )
+
     return [
         depth_to_scan_node,
         slam_toolbox_node,
         nav2_bringup,
         rviz_node,
+        # apriltag_node,
+        # tag_localization_node,
+        # ekf_node,
     ]
 
 
