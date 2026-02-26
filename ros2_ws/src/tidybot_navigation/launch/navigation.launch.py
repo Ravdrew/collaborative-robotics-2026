@@ -124,7 +124,7 @@ def launch_setup(context, *args, **kwargs):
     # parameters=[os.path.join(pkg_dir, 'config', 'tag_locations.yaml')],
     # )
 
-    # # EKF to smoothly integrate the global strapdown from the apriltags to the continuous slam happening
+    # # EKF to smoothly integrate the global strapdown from the apriltags to the continuous slam happening, relies on robot_localization package
     # ekf_node = Node(
     # package='robot_localization',
     # executable='ekf_node',
