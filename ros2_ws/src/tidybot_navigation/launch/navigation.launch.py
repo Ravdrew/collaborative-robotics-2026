@@ -136,14 +136,32 @@ def launch_setup(context, *args, **kwargs):
     # ],
     # )
 
+    # # this assume installation of m-explore-ros2
+    # # it subscribes to /map and publishes /goal_pose
+    # explore_node = Node(
+    # package='explore_lite',
+    # executable='explore',
+    # name='explore',
+    # output='screen',
+    # parameters=[{
+    #     'use_sim_time': use_sim_time,
+    #     'costmap_topic': '/global_costmap/costmap',
+    #     'map_topic': '/map',
+    #     'goal_topic': '/goal_pose',
+    #     'visualize': True
+    # }]
+    # )
+
     return [
         depth_to_scan_node,
         slam_toolbox_node,
         nav2_bringup,
-        rviz_node,
+        rviz_node
+        # ,
         # apriltag_node,
         # tag_localization_node,
         # ekf_node,
+        # explore_node
     ]
 
 
