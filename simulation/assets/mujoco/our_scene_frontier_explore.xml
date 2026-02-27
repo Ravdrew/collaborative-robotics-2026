@@ -1,0 +1,87 @@
+<mujoco model="tidybot bimanual scene">
+  <!-- Include the default robot model -->
+  <include file="tidybot_wx250s_bimanual.xml"/>
+
+  <statistic center="0 0 0.525" extent="1.1" meansize="0.05"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="140" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Add walls to simulate a maze -->
+    <!-- <body name="wall1" pos="2 0 0.5">
+        <geom type="box" size="0.1 0.5 1" rgba="0.8 0.1 0.1 1"/>
+    </body>
+    <body name="wall2" pos="2 1 0.5">
+        <geom type="box" size="0.1 0.5 1" rgba="0.1 0.8 0.1 1"/>
+    </body> -->
+    <!-- Add more walls as needed -->
+    <!-- Outer Boundary -->
+
+    <!-- Left Wall -->
+    <body name="outer_left" pos="-5 0 0.5">
+        <geom type="box" size="0.1 5 1" rgba="0.8 0.1 0.1 1"/>
+    </body>
+
+    <!-- Right Wall -->
+    <body name="outer_right" pos="5 0 0.5">
+        <geom type="box" size="0.1 5 1" rgba="0.1 0.8 0.1 1"/>
+    </body>
+
+    <!-- Bottom Wall -->
+    <body name="outer_bottom" pos="0 -5 0.5">
+        <geom type="box" size="5 0.1 1" rgba="0.1 0.1 0.8 1"/>
+    </body>
+
+    <!-- Top Wall -->
+    <body name="outer_top" pos="0 5 0.5">
+        <geom type="box" size="5 0.1 1" rgba="0.8 0.8 0.1 1"/>
+    </body>
+
+
+    <!-- Inner Maze Walls -->
+
+    <!-- Vertical center divider
+    <body name="inner_v1" pos="0 1 0.5">
+        <geom type="box" size="0.1 2 1" rgba="0.8 0.3 0.8 1"/>
+    </body> -->
+
+    <!-- Lower vertical segment -->
+    <body name="inner_v2" pos="-1 -2 0.5">
+        <geom type="box" size="0.1 2 1" rgba="0.1 0.8 0.1 1"/>
+    </body>
+
+    <!-- Horizontal mid wall
+    <body name="inner_h1" pos="1 0 0.5">
+        <geom type="box" size="2 0.1 1" rgba="0.9 0.4 0.2 1"/>
+    </body> -->
+
+    <!-- Small top horizontal -->
+    <body name="inner_h2" pos="-2 2 0.5">
+        <geom type="box" size="2 0.1 1" rgba="0.8 0.1 0.1 1"/>
+    </body>
+
+    <!-- Bottom right block -->
+    <body name="inner_h3" pos="1 -4 0.5">
+        <geom type="box" size="1.5 0.1 1" rgba="0.1 0.1 0.8 1"/>
+    </body>
+
+    <!-- Small obstacle block -->
+    <body name="inner_block" pos="3 3 0.5">
+        <geom type="box" size="0.25 0.25 1" rgba="0.9 0.2 0.5 1"/>
+    </body>
+  </worldbody>
+</mujoco>
