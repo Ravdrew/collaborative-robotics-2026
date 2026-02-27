@@ -165,16 +165,19 @@ smoother_server:
       do_refinement: true
 
 behavior_server:
+  #we need our own custom behavior tree, so that we can have drive on heading as a primary and the rest as secondaries,
+  #it only lists the plugins here, we cant actually chagne the heirarchy. 
+  #But commenting out the other behaviors is a quick fix to ensure the only problem is the bot being out of bounds during initiation
   ros__parameters:
     use_sim_time: false
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
-    spin:
-      plugin: "nav2_behaviors/Spin"
-    backup:
-      plugin: "nav2_behaviors/BackUp"
+    behavior_plugins: ["drive_on_heading", "wait"] #["spin", "backup", "drive_on_heading", "wait"] made drive_on_heading our primary and only recovery for now 
+    #spin:
+      #plugin: "nav2_behaviors/Spin"
+    #backup:
+      #plugin: "nav2_behaviors/BackUp"
     drive_on_heading:
       plugin: "nav2_behaviors/DriveOnHeading"
     wait:
