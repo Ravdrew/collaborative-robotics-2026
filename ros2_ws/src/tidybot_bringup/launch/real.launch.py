@@ -52,6 +52,7 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -66,7 +67,7 @@ def launch_setup(context, *args, **kwargs):
     use_left_arm = LaunchConfiguration('use_left_arm').perform(context) == 'true'
     use_pan_tilt = LaunchConfiguration('use_pan_tilt').perform(context) == 'true'
     use_camera = LaunchConfiguration('use_camera').perform(context) == 'true'
-    use_lidar = LaunchConfiguration('use_lidar').perform(context) == 'false'
+    use_lidar = LaunchConfiguration('use_lidar').perform(context) == 'true'
     use_compression = LaunchConfiguration('use_compression').perform(context) == 'true'
     use_rviz = LaunchConfiguration('use_rviz').perform(context) == 'true'
     use_planner = LaunchConfiguration('use_planner').perform(context) == 'true'
@@ -101,7 +102,10 @@ def launch_setup(context, *args, **kwargs):
 
     # URDF from xacro
     urdf_path = PathJoinSubstitution([pkg_description, 'urdf', 'tidybot_wx250s.urdf.xacro'])
-    robot_description = Command(['xacro ', urdf_path, ' include_camera_optical_frames:=false'])
+    robot_description = ParameterValue(
+        Command(['xacro ', urdf_path, ' include_camera_optical_frames:=false']),
+        value_type=str
+    )
 
     # Robot state publisher (always needed)
     nodes.append(Node(
@@ -407,7 +411,7 @@ def generate_launch_description():
             description='Launch microphone recording node'
         ),
         DeclareLaunchArgument(
-            'use_planner', default_value='false',
+            'use_planner', default_value='true',
             description='Launch IK motion planner for real hardware'
         ),
         DeclareLaunchArgument(
