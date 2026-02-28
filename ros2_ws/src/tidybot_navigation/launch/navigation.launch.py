@@ -82,6 +82,10 @@ def launch_setup(context, *args, **kwargs):
         ],
     )
 
+    # Custom BT XML: DriveOnHeading (primary) → Spin (secondary) → Wait
+    # Replaces the default Nav2 BT which uses BackUp and wipes costmaps mid-recovery.
+    bt_xml_path = os.path.join(pkg_dir, 'behavior_trees', 'navigate_to_pose.xml')
+
     # Nav2 bringup (controller, planner, behavior, bt_navigator, etc.)
     nav2_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -90,6 +94,7 @@ def launch_setup(context, *args, **kwargs):
         launch_arguments={
             'use_sim_time': use_sim_time,
             'params_file': os.path.join(pkg_dir, 'config', 'nav2_params.yaml'),
+            'default_bt_xml_filename': bt_xml_path,
         }.items(),
     )
 

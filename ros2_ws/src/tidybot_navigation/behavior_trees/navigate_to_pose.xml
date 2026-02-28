@@ -1,0 +1,67 @@
+<!--
+  TidyBot2 Custom Navigation Behavior Tree
+
+  Changes from the Nav2 default (navigate_to_pose_w_replanning_and_recovery.xml):
+
+  RECOVERY ORDER (RoundRobin, highest to lowest priority):
+    1. DriveOnHeading — primary recovery. Drives 0.6m forward into camera-observed
+       free space. Most effective escape from out-of-bounds and stuck states on this
+       robot because the D435 camera faces forward and has already mapped that space.
+    2. Spin — secondary recovery. Rotates 90° to reorient the robot and rescan the
+       environment after DriveOnHeading has moved it to a new position.
+    3. Wait — tertiary recovery. Pauses 5s for external intervention or environment
+       change before the BT retries the full navigation pipeline.
+
+  REMOVED:
+    - BackUp: the robot has no rear-facing sensor, driving backward risks collision.
+    - ClearEntireCostmap pair in RoundRobin: wiping both costmaps between retries
+      destroys the SLAM map context built up during navigation and causes the planner
+      to replan through unknown space, producing erratic "random direction" behaviour.
+
+  KEPT:
+    - Inline single-failure ClearEntireCostmap on ComputePathToPose failure: targeted
+      clear of only the global costmap when path planning specifically fails.
+    - Inline single-failure ClearEntireCostmap on FollowPath failure: targeted clear
+      of only the local costmap when the controller specifically fails.
+    - number_of_retries="6" on the outer RecoveryNode: 6 cycles through the RoundRobin
+      before the entire navigation goal is aborted.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+
+      <!-- Normal navigation: replan the global path at 1 Hz -->
+      <PipelineSequence name="NavigateWithReplanning">
+
+        <!-- If path computation fails once, clear the global costmap and retry once -->
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+
+        <!-- If path following fails once, clear the local costmap and retry once -->
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+
+      </PipelineSequence>
+
+      <!-- Recovery: exit immediately if the goal changes, otherwise cycle through actions -->
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <!-- 1st: drive 0.6m forward into camera-observed free space -->
+          <DriveOnHeading dist="0.6" speed="0.1" time_allowance="10"/>
+          <!-- 2nd: spin 90° to reorient and rescan the environment -->
+          <Spin spin_dist="1.57"/>
+          <!-- 3rd: wait 5s before retrying the full navigation pipeline -->
+          <Wait wait_duration="5"/>
+        </RoundRobin>
+      </ReactiveFallback>
+
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

@@ -24,4 +24,9 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+# Install behavior tree XML files
+install(DIRECTORY behavior_trees/
+  DESTINATION share/${PROJECT_NAME}/behavior_trees
+)
+
 ament_package()

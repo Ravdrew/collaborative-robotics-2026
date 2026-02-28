@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Startup Clearing Scan Node.
 
-Publishes a single synthetic 360-degree LaserScan on /scan at startup.
-This seeds SLAM Toolbox's map and the Nav2 costmap with FREE space around
-the robot's footprint, solving the blind-spot initialization problem caused
-by the forward-facing D435 depth camera.
+Publishes a single synthetic 360-degree LaserScan on /startup_clear_scan at
+startup.  This topic is consumed only by the Nav2 costmap obstacle layers —
+NOT by SLAM Toolbox — so its angular parameters do not need to match the real
+depthimage_to_laserscan output on /scan.
 
-The node waits until SLAM Toolbox and the costmap are both subscribed to
-/scan and TF has had time to settle, publishes exactly one scan, then exits.
+The costmap raytrace-clears every cell from the robot centre out to
+CLEAR_RADIUS, marking the robot footprint and immediate surroundings as FREE
+space before the first real depth scan arrives.  This fixes the initialization
+problem where the robot footprint sits in unknown (lethal) costmap space and
+triggers immediate recovery behaviour.
+
+The node waits until the local and global costmap obstacle layers are both
+subscribed to /startup_clear_scan and TF has settled, publishes exactly one
+scan, then exits.
 """
 
 import math
@@ -20,60 +27,60 @@ from sensor_msgs.msg import LaserScan
 
 # Clearing radius in metres — just outside the robot footprint (0.5m x 0.44m).
 # All cells between the robot centre and this radius will be marked FREE.
-# The thin ring at this radius will be marked as a temporary obstacle, which
-# the real depth scan overwrites within the first scan cycle.
 CLEAR_RADIUS = 0.6
 
 # One ray per degree gives a smooth disc with no large gaps at the resolution
-# used by the costmap (0.05m).
+# used by the costmap (0.05 m/cell).
 NUM_RAYS = 360
 
 # Wait for at least this many subscribers before publishing.
-# Covers: SLAM Toolbox (1) + global costmap obstacle layer (1).
-# The local costmap obstacle layer is a bonus if it subscribes in time.
+# Covers: local costmap obstacle layer (1) + global costmap obstacle layer (1).
 MIN_SUBSCRIBERS = 2
 
 # Maximum seconds to wait for subscribers before publishing anyway.
 SUBSCRIBER_TIMEOUT = 30.0
 
 # Additional settle time after subscribers appear, to allow the TF tree
-# (odom → base_link) to become valid before SLAM processes the scan.
+# (odom → base_link) to become valid before the costmap transforms the scan.
 TF_SETTLE_DELAY = 0.5
+
+# Separate topic so this scan is never seen by SLAM Toolbox.
+# Both costmap obstacle layers must list this topic as an observation source.
+TOPIC = '/startup_clear_scan'
 
 
 class StartupClearScan(Node):
     def __init__(self):
         super().__init__('startup_clear_scan')
 
-        # Use sensor_data QoS so the message is accepted by SLAM Toolbox and
-        # the Nav2 costmap obstacle layers, which both subscribe with BEST_EFFORT.
+        # Use sensor_data QoS to match the costmap obstacle layer's subscription.
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
-        self._pub = self.create_publisher(LaserScan, '/scan', sensor_qos)
+        self._pub = self.create_publisher(LaserScan, TOPIC, sensor_qos)
 
     def wait_and_publish(self):
-        """Block until subscribers are ready, then publish one clearing scan."""
+        """Block until costmap subscribers are ready, then publish one clearing scan."""
         self.get_logger().info(
-            f'Startup clear scan: waiting for {MIN_SUBSCRIBERS} /scan '
-            f'subscribers (SLAM Toolbox + costmap)...'
+            f'Startup clear scan: waiting for {MIN_SUBSCRIBERS} {TOPIC} '
+            f'subscribers (local + global costmap obstacle layers)...'
         )
 
         deadline = time.time() + SUBSCRIBER_TIMEOUT
-        while self.count_subscribers('/scan') < MIN_SUBSCRIBERS:
+        while self.count_subscribers(TOPIC) < MIN_SUBSCRIBERS:
             if time.time() > deadline:
                 self.get_logger().warn(
-                    f'Timed out waiting for {MIN_SUBSCRIBERS} /scan subscribers '
-                    f'(have {self.count_subscribers("/scan")}). Publishing anyway.'
+                    f'Timed out waiting for {MIN_SUBSCRIBERS} {TOPIC} subscribers '
+                    f'(have {self.count_subscribers(TOPIC)}). Publishing anyway.'
                 )
                 break
             time.sleep(0.1)
 
         self.get_logger().info(
-            f'Found {self.count_subscribers("/scan")} /scan subscribers. '
+            f'Found {self.count_subscribers(TOPIC)} {TOPIC} subscribers. '
             f'Waiting {TF_SETTLE_DELAY}s for TF to settle...'
         )
         time.sleep(TF_SETTLE_DELAY)
