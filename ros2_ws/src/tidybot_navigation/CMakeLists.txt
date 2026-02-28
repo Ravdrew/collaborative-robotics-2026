@@ -18,4 +18,11 @@ install(DIRECTORY rviz/
   DESTINATION share/${PROJECT_NAME}/rviz
 )
 
+# Install Python scripts
+install(PROGRAMS
+  scripts/init_forward.py 
+  scripts/tag_global_pose_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

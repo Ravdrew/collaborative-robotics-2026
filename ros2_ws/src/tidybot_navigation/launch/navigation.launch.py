@@ -96,24 +96,12 @@ def launch_setup(context, *args, **kwargs):
     )
 
     # this calls the script that moves the robot forward on startup into the cost map
-    # this is launched as an ExecuteProcess and not part of a ros executable
-    initial_mover_node = TimerAction(
-        period=7.0,   # give Nav2 time to bring up costmap
-        actions=[
-            ExecuteProcess(
-                cmd=[
-                    'python3',
-                    PathJoinSubstitution([
-                        FindPackageShare('tidybot_navigation'),
-                        '..', '..', 'src',
-                        'tidybot_navigation',
-                        'tidybot_navigation',
-                        'init_forward.py'
-                    ])
-                ],
-                output='screen'
-            )
-        ]
+    initial_mover_node = Node(
+        package='tidybot_navigation',
+        executable='init_forward.py',
+        name='initial_mover',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
     )
 
     # RViz with navigation config
