@@ -20,13 +20,15 @@ This limitation goes away once a real LiDAR is available (scan_source:=lidar).
 """
 
 import os
+# import sys
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, ExecuteProcess, TimerAction
 from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, Command, TextSubstitution
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 
 
@@ -93,6 +95,27 @@ def launch_setup(context, *args, **kwargs):
         }.items(),
     )
 
+    # this calls the script that moves the robot forward on startup into the cost map
+    # this is launched as an ExecuteProcess and not part of a ros executable
+    initial_mover_node = TimerAction(
+        period=7.0,   # give Nav2 time to bring up costmap
+        actions=[
+            ExecuteProcess(
+                cmd=[
+                    'python3',
+                    PathJoinSubstitution([
+                        FindPackageShare('tidybot_navigation'),
+                        '..', '..', 'src',
+                        'tidybot_navigation',
+                        'tidybot_navigation',
+                        'init_forward.py'
+                    ])
+                ],
+                output='screen'
+            )
+        ]
+    )
+
     # RViz with navigation config
     rviz_node = Node(
         condition=IfCondition(use_rviz),
@@ -154,14 +177,14 @@ def launch_setup(context, *args, **kwargs):
 
     return [
         depth_to_scan_node,
-        slam_toolbox_node,
-        nav2_bringup,
+        slam_toolbox_node,          # create map
+        nav2_bringup,               # start nav stack
+        initial_mover_node,         # move robot into map
+        # apriltag_node,            # detect tags that may be in view
+        # tag_localization_node,    # integrate tag-based pose
+        # ekf_node,                 # fuse localization
+        # explore_node,             # frontier explore
         rviz_node
-        # ,
-        # apriltag_node,
-        # tag_localization_node,
-        # ekf_node,
-        # explore_node
     ]
 
 
