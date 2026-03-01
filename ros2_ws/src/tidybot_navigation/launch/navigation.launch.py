@@ -84,6 +84,16 @@ def launch_setup(context, *args, **kwargs):
         ],
     )
 
+    # initial pose publisher that ties the slam initial position into the costmap nav2 generates
+    # it calls the script initial_pose_publisher.py in scripts/
+    initial_pose_node = Node(
+        package='tidybot_navigation',
+        executable='initial_pose_publisher.py',
+        name='initial_pose_publisher',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
+    )
+
     # Nav2 bringup (controller, planner, behavior, bt_navigator, etc.)
     nav2_bringup = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -95,14 +105,14 @@ def launch_setup(context, *args, **kwargs):
         }.items(),
     )
 
-    # this calls the script that moves the robot forward on startup into the cost map
-    initial_mover_node = Node(
-        package='tidybot_navigation',
-        executable='init_forward.py',
-        name='initial_mover',
-        output='screen',
-        parameters=[{'use_sim_time': use_sim_time}],
-    )
+    # # this calls the script that moves the robot forward on startup into the cost map
+    # initial_mover_node = Node(
+    #     package='tidybot_navigation',
+    #     executable='init_forward.py',
+    #     name='initial_mover',
+    #     output='screen',
+    #     parameters=[{'use_sim_time': use_sim_time}],
+    # )
 
     # RViz with navigation config
     rviz_node = Node(
@@ -166,8 +176,9 @@ def launch_setup(context, *args, **kwargs):
     return [
         depth_to_scan_node,
         slam_toolbox_node,          # create map
+        initial_pose_node,          # ties down slam localization so costmap can render it properly
         nav2_bringup,               # start nav stack
-        initial_mover_node,         # move robot into map
+        # initial_mover_node,       # move robot into map
         # apriltag_node,            # detect tags that may be in view
         # tag_localization_node,    # integrate tag-based pose
         # ekf_node,                 # fuse localization
