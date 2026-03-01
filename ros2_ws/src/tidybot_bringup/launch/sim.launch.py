@@ -47,7 +47,7 @@ def launch_setup(context, *args, **kwargs):
     ik_model_path = os.path.join(repo_root, 'simulation', 'assets', 'mujoco', 'tidybot_wx250s_bimanual.xml')
 
     # URDF from xacro
-    urdf_path = PathJoinSubstitution([pkg_description, 'urdf', 'tidybot_wx250s.urdf.xacro'])
+    urdf_path = PathJoinSubstitution([pkg_description, 'urdf', 'tidybot_wx250s_lidar.urdf.xacro'])
     robot_description = ParameterValue(
         Command(['xacro ', urdf_path]),
         value_type=str
