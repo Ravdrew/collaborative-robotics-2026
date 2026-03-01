@@ -1,0 +1,194 @@
+# this is built for sim with a lower bt frequency, 
+# smaller planner resolution and smaller costmap sizes
+# do not use this script on the actual robot
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odom
+    bt_loop_duration: 50   # 50ms tick for sim smoothness
+    default_server_timeout: 20
+    navigators: ["navigate_to_pose", "navigate_through_poses"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator/NavigateToPoseNavigator"
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator/NavigateThroughPosesNavigator"
+    error_code_names:
+      - compute_path_error_code
+      - follow_path_error_code
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    controller_frequency: 20.0   # slower for sim
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.25
+      movement_time_allowance: 20.0
+
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: true
+      xy_goal_tolerance: 0.15
+      yaw_goal_tolerance: 0.20
+
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 20
+      model_dt: 0.1
+      batch_size: 100   # smaller for sim
+      vx_std: 0.2
+      vy_std: 0.2
+      wz_std: 0.4
+      vx_max: 0.25
+      vx_min: -0.15
+      vy_max: 0.2
+      wz_max: 0.8
+      iteration_count: 1
+      prune_distance: 1.7
+      transform_tolerance: 0.1
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "Omni" 
+      visualize: true    # so you see trajectories
+      reset_period: 1.0
+      regenerate_noises: true
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+      AckermannConstraints:
+        min_turning_r: 0.10
+      critics:
+        - "GoalCritic"
+        - "GoalAngleCritic"
+        - "ObstaclesCritic"
+        - "PathFollowCritic"
+        - "PathAngleCritic"
+        - "PathAlignCritic"
+        - "PreferForwardCritic"
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_planner_frequency: 5.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      tolerance: 0.25
+      downsample_costmap: true
+      downsampling_factor: 2
+      allow_unknown: true
+      max_iterations: 5000    # much smaller for sim
+      max_on_approach_iterations: 500
+      max_planning_time: 1.0
+      motion_model_for_search: "REEDS_SHEPP"
+      angle_quantization_bins: 36
+      analytic_expansion_ratio: 2.0
+      analytic_expansion_max_length: 2.0
+      minimum_turning_radius: 0.10
+      reverse_penalty: 2.0
+      change_penalty: 0.0
+      non_free_space_weight: 1.0
+      cost_penalty: 2.0
+      retrospective_penalty: 0.015
+      lookup_table_size: 20.0
+      cache_obstacle_heuristic: false
+      smooth_path: true
+      smoother:
+        max_iterations: 200
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 1
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 10.0
+      publish_frequency: 5.0
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true 
+      width: 5   # smaller window for sim
+      height: 5
+      resolution: 0.05
+      robot_radius: 0.30
+      footprint: "[[0.25, 0.22], [0.25, -0.22], [-0.25, -0.22], [-0.25, 0.22]]"
+      transform_tolerance: 0.5
+      unknown_cost_value: 0
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        footprint_clearing_enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 5.0
+          raytrace_min_range: 0.28
+          obstacle_max_range: 4.5
+          obstacle_min_range: 0.28
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: true
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link
+      robot_radius: 0.30
+      footprint: "[[0.25, 0.22], [0.25, -0.22], [-0.25, -0.22], [-0.25, 0.22]]"
+      resolution: 0.05
+      track_unknown_space: true
+      rolling_window: true
+      width: 20    # smaller for sim
+      height: 20
+      origin_x: -10.0
+      origin_y: -10.0
+      transform_tolerance: 0.5
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+        track_unknown_space: true
+        use_maximum: false
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        footprint_clearing_enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 5.0
+          raytrace_min_range: 0.28
+          obstacle_max_range: 4.5
+          obstacle_min_range: 0.28
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+      always_send_full_costmap: true

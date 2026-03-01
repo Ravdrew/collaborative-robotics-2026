@@ -101,7 +101,8 @@ def launch_setup(context, *args, **kwargs):
         ),
         launch_arguments={
             'use_sim_time': use_sim_time,
-            'params_file': os.path.join(pkg_dir, 'config', 'nav2_params.yaml'),
+            # NOTE: change the following line between nav2_params.yaml and nav2_params_sim.yaml
+            'params_file': os.path.join(pkg_dir, 'config', 'nav2_params_sim.yaml'),
         }.items(),
     )
 
