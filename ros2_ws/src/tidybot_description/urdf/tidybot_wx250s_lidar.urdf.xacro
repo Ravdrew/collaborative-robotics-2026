@@ -36,11 +36,17 @@
     </inertial>
   </link>
 
-  <!-- Odom frame for mobile base -->
+  <!-- Odom frame for mobile base (with base_footprint for Nav2) -->
   <link name="odom"/>
-  <joint name="odom_to_base" type="floating">
+  <link name="base_footprint"/>
+  <joint name="odom_to_base_footprint" type="floating">
     <parent link="odom"/>
+    <child link="base_footprint"/>
+  </joint>
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
     <child link="base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 1.5708"/>
   </joint>
 
   <!-- ==================== CAMERA MOUNT ==================== -->

@@ -11,8 +11,17 @@ Usage:
   # Real hardware with depth camera (on top of real.launch.py)
   ros2 launch tidybot_navigation navigation.launch.py
 
-  # Real hardware with LiDAR (skip depthimage_to_laserscan)
+  # Real hardware with LiDAR only (skip depthimage_to_laserscan)
   ros2 launch tidybot_navigation navigation.launch.py scan_source:=lidar
+
+  # Real hardware with both LiDAR + depth camera
+  ros2 launch tidybot_navigation navigation.launch.py scan_source:=both
+
+scan_source modes:
+  depth — depthimage_to_laserscan publishes /scan (SLAM + costmaps use depth)
+  lidar — LiDAR driver publishes /scan externally (SLAM + costmaps use LiDAR)
+  both  — LiDAR publishes /scan (used by SLAM), depth publishes /scan_depth
+          (costmaps use both /scan and /scan_depth)
 
 NOTE: The D435 is on a pan-tilt mount. Keep camera at pan=0, tilt=0 during
 navigation, otherwise the laser scan plane rotates and corrupts the costmap.
@@ -50,7 +59,7 @@ def launch_setup(context, *args, **kwargs):
         depth_info_topic = '/camera/depth/camera_info'
     scan_output_frame = 'camera_link'  # from URDF, not flipped like camera_link
 
-    # depthimage_to_laserscan — only when scan_source:=depth
+    # depthimage_to_laserscan — when scan_source:=depth (publishes /scan)
     depth_to_scan_node = Node(
         condition=LaunchConfigurationEquals('scan_source', 'depth'),
         package='depthimage_to_laserscan',
@@ -68,6 +77,28 @@ def launch_setup(context, *args, **kwargs):
             ('depth', depth_topic),
             ('depth_camera_info', depth_info_topic),
             ('scan', '/scan'),
+        ],
+    )
+
+    # depthimage_to_laserscan — when scan_source:=both (publishes /scan_depth)
+    # LiDAR owns /scan for SLAM; depth camera adds /scan_depth for costmaps only
+    depth_to_scan_depth_node = Node(
+        condition=LaunchConfigurationEquals('scan_source', 'both'),
+        package='depthimage_to_laserscan',
+        executable='depthimage_to_laserscan_node',
+        name='depthimage_to_laserscan',
+        parameters=[{
+            'use_sim_time': use_sim_time,
+            'scan_time': 0.033,
+            'range_min': 0.28,
+            'range_max': 3.0,
+            'scan_height': 100,
+            'output_frame': scan_output_frame,
+        }],
+        remappings=[
+            ('depth', depth_topic),
+            ('depth_camera_info', depth_info_topic),
+            ('scan', '/scan_depth'),
         ],
     )
 
@@ -150,6 +181,7 @@ def launch_setup(context, *args, **kwargs):
 
     return [
         depth_to_scan_node,
+        depth_to_scan_depth_node,
         localization_node,
         nav2_bringup,
         rviz_node,
@@ -168,8 +200,8 @@ def generate_launch_description():
             'sim', default_value='false',
             description='Running in simulation (uses nav depth topics with correct geometry)'),
         DeclareLaunchArgument(
-            'scan_source', default_value='depth',
-            description='"depth" uses depthimage_to_laserscan, "lidar" assumes /scan published externally'),
+            'scan_source', default_value='both',
+            description='"depth" uses depthimage_to_laserscan→/scan, "lidar" expects /scan from driver, "both" uses LiDAR→/scan + depth→/scan_depth'),
         DeclareLaunchArgument(
             'use_rviz', default_value='true',
             description='Launch RViz with navigation config'),
