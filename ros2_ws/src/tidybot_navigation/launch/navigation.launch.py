@@ -37,6 +37,7 @@ def launch_setup(context, *args, **kwargs):
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_rviz = LaunchConfiguration('use_rviz')
     is_sim = LaunchConfiguration('sim').perform(context) == 'true'
+    use_ground_truth = LaunchConfiguration('use_ground_truth').perform(context) == 'true'
 
     # In simulation, use un-flipped depth on nav topics
     # On real hardware, use standard RealSense topics
@@ -80,6 +81,14 @@ def launch_setup(context, *args, **kwargs):
             os.path.join(pkg_dir, 'config', 'slam_toolbox_params.yaml'),
             {'use_sim_time': use_sim_time},
         ],
+    )
+
+    # Ground truth localization: static identity map→odom (bypasses SLAM)
+    ground_truth_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='ground_truth_map_odom',
+        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
     )
 
     # Nav2 bringup (controller, planner, behavior, bt_navigator, etc.)
@@ -136,9 +145,12 @@ def launch_setup(context, *args, **kwargs):
     # ],
     # )
 
+    # Use ground truth (static map=odom) or SLAM for localization
+    localization_node = ground_truth_tf if use_ground_truth else slam_toolbox_node
+
     return [
         depth_to_scan_node,
-        slam_toolbox_node,
+        localization_node,
         nav2_bringup,
         rviz_node,
         # apriltag_node,
@@ -161,5 +173,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_rviz', default_value='true',
             description='Launch RViz with navigation config'),
+        DeclareLaunchArgument(
+            'use_ground_truth', default_value='false',
+            description='Use ground truth localization (static map=odom) instead of SLAM'),
         OpaqueFunction(function=launch_setup),
     ])

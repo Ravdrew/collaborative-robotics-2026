@@ -164,11 +164,11 @@ class MuJoCoBridgeNode(Node):
         # Create MuJoCo renderer for camera images
         self.renderer = mujoco.Renderer(self.model, height=480, width=640)
 
-        # State variables
+        # State variables — read initial base pose from keyframe/qpos
         self.sim_step_count = 0
-        self.base_x = 0.0
-        self.base_y = 0.0
-        self.base_th = np.pi / 2  # Robot model faces -Y, rotate 90° to face +X
+        self.base_x = float(self.data.qpos[self.model.jnt_qposadr[self.joint_ids['joint_x']]]) if 'joint_x' in self.joint_ids else 0.0
+        self.base_y = float(self.data.qpos[self.model.jnt_qposadr[self.joint_ids['joint_y']]]) if 'joint_y' in self.joint_ids else 0.0
+        self.base_th = float(self.data.qpos[self.model.jnt_qposadr[self.joint_ids['joint_th']]]) if 'joint_th' in self.joint_ids else np.pi / 2
         self.cmd_vel = Twist()
         self.current_vel = Twist()  # Smoothed velocity
         self.last_sim_time = None
@@ -576,15 +576,17 @@ class MuJoCoBridgeNode(Node):
             odom = Odometry()
             odom.header.stamp = now
             odom.header.frame_id = 'odom'
-            odom.child_frame_id = 'base_link'
+            odom.child_frame_id = 'base_footprint'
 
             odom.pose.pose.position.x = actual_base_x
             odom.pose.pose.position.y = actual_base_y
             odom.pose.pose.position.z = 0.0
 
             # Convert yaw to quaternion
-            cy = np.cos(actual_base_th * 0.5)
-            sy = np.sin(actual_base_th * 0.5)
+            # Offset by -π/2: MuJoCo model faces -Y at θ=0, ROS expects +X at θ=0
+            ros_yaw = actual_base_th - np.pi / 2
+            cy = np.cos(ros_yaw * 0.5)
+            sy = np.sin(ros_yaw * 0.5)
             odom.pose.pose.orientation.x = 0.0
             odom.pose.pose.orientation.y = 0.0
             odom.pose.pose.orientation.z = sy
@@ -594,11 +596,11 @@ class MuJoCoBridgeNode(Node):
 
             self.odom_pub.publish(odom)
 
-            # Publish TF: odom -> base_link (using actual MuJoCo position)
+            # Publish TF: odom -> base_footprint (using actual MuJoCo position)
             t = TransformStamped()
             t.header.stamp = now
             t.header.frame_id = 'odom'
-            t.child_frame_id = 'base_link'
+            t.child_frame_id = 'base_footprint'
             t.transform.translation.x = actual_base_x
             t.transform.translation.y = actual_base_y
             t.transform.translation.z = 0.0

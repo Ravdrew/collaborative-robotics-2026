@@ -11,7 +11,7 @@ slam_toolbox:
     # ROS params
     odom_frame: odom
     map_frame: map
-    base_frame: base_link
+    base_frame: base_footprint
     scan_topic: /scan
     use_sim_time: false
     mode: mapping
