@@ -142,6 +142,11 @@ class FruitTargetNode(Node):
 
         conf, cls_name, (x1, y1, x2, y2) = best
 
+        width = x2 - x1
+        height = y2 - y1
+
+        orientation = 1.0 if width < height else -1.0
+
         # Compute bbox center (pixel)
         cx = int((x1 + x2) * 0.5)
         cy = int((y1 + y2) * 0.5)
@@ -168,7 +173,7 @@ class FruitTargetNode(Node):
             f"XYZ=({X:.3f},{Y:.3f},{Z:.3f})"
         )
 
-        self.publish_target((X, Y, Z), rgb_msg.header)
+        self.publish_target((X, Y, Z), orientation, rgb_msg.header)
 
         # Optional: visualize (comment out if headless)
         # self.debug_viz(rgb, (x1, y1, x2, y2), cls_name, conf, (cx, cy), depth_m)
@@ -257,7 +262,7 @@ class FruitTargetNode(Node):
 
     # --------------------------------------------------
 
-    def publish_target(self, point_xyz, header):
+    def publish_target(self, point_xyz, orientation, header):
         msg = PointStamped()
         msg.header = header
         msg.header.frame_id = "camera_color_optical_frame"
@@ -275,7 +280,7 @@ class FruitTargetNode(Node):
         pose_msg.position.y = float(point_xyz[1])
         pose_msg.position.z = float(point_xyz[2])
         # No orientation, set default (w=1, x/y/z=0)
-        pose_msg.orientation.w = 1.0
+        pose_msg.orientation.w = orientation
         pose_msg.orientation.x = 0.0
         pose_msg.orientation.y = 0.0
         pose_msg.orientation.z = 0.0

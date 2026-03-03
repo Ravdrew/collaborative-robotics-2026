@@ -159,6 +159,7 @@ class GraspNode(Node):
         self.create_subscription(Pose,       '/pick_target_local',   self._on_pick_target,   10)
         self.create_subscription(Pose,       '/EEF_pose_command',    self._on_eef_pose,       10)
         self.create_subscription(JointState, '/joint_states',        self._on_joint_states,   10)
+        self.create_subscription(Float64,    '/fsm_pick_request',    self._on_pick_start, 10)
 
         # ------------------------------------------------------------------
         # Service client
@@ -175,6 +176,7 @@ class GraspNode(Node):
         self._plan_future      = None   # pending service call future
         self._plan_accepted    = False  # True once the planner has accepted the grasp request
         self._finger_pos       = None   # latest finger position (metres)
+        self._pick_target_pose = None   # pick target pose in camera_color_optical_frame
 
         # 20 Hz control loop
         self.create_timer(0.05, self._control_loop)
@@ -197,15 +199,20 @@ class GraspNode(Node):
     # ------------------------------------------------------------------
 
     def _on_pick_target(self, msg: Pose) -> None:
-        """Received a new pick target. Only act when idle."""
+        self._pick_target_pose = msg
+    
+    def _on_pick_start(self, msg: Bool) -> None:
+        """Received a new pick command. Only act when idle."""
         if self._state not in (State.IDLE,):
             self.get_logger().warn('Grasp already in progress — ignoring new pick target.')
             return
-
-        self.get_logger().info('Pick target received — relaying to grasp_generation_node.')
+        if self._pick_target_pose is None:
+            self.get_logger().warn('No pick target pose received — ignoring pick command.')
+            return
+        self.get_logger().info('Pick command received — relaying to grasp_generation_node.')
         self._waiting_for_eef = True
         self._eef_pose        = None
-        self._object_pose_pub.publish(msg)
+        self._object_pose_pub.publish(self._pick_target_pose)
         self._transition(State.WAIT_EEF_POSE)
 
     def _on_eef_pose(self, msg: Pose) -> None:
