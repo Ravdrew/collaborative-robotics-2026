@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-# Turtlebot frontier exploration script
+# Frontier exploration (tidybot-adapted)
 
 import rclpy  
 import scipy
 from rclpy.node import Node     
-from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
+#from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
 from asl_tb3_lib.math_utils import wrap_angle
 from asl_tb3_lib.tf_utils import quaternion_to_yaw
 from scipy.interpolate import splrep, splev
-from asl_tb3_msgs.msg import TurtleBotControl, TurtleBotState
+from geometry_msgs.msg import Pose2D
 import numpy as np
 from scipy import linalg
 from std_msgs.msg import Bool, String
-from asl_tb3_lib.grids import snap_to_grid, StochOccupancyGrid2D
+from asl_tb3_lib.grids import snap_to_grid, StochOccupancyGrid2D  #keep, this is robot-agnostic
 from nav_msgs.msg import OccupancyGrid, Path
 from scipy.signal import convolve2d
 
@@ -20,10 +20,11 @@ class FrontierExplorer(Node):
     def __init__(self):
         super().__init__("frontier_explorer")
 
-        self.state_sub = self.create_subscription(TurtleBotState, "/state", self.state_callback, 10)
+        # subscribe to estimated pose published by the state estimator
+        self.state_sub = self.create_subscription(Pose2D, "/odom_est_pose", self.state_callback, 10)
         self.map_sub = self.create_subscription(OccupancyGrid, "/map", self.map_callback, 10)
         self.nav_success_sub = self.create_subscription(Bool, "/nav_success", self.nav_success_callback, 10)
-        self.cmd_nav_pub = self.create_publisher(TurtleBotState, "/cmd_nav", 10)
+        self.cmd_nav_pub = self.create_publisher(Pose2D, "/cmd_nav", 10)
         self.detection_callback = self.create_subscription(Bool, "/detector_bool", self.detect_callback, 10)
 
         self.current_state = None
@@ -34,17 +35,14 @@ class FrontierExplorer(Node):
         # timer added
         self.stop_timer = None
 
-    def state_callback(self, msg: TurtleBotState):
+    def state_callback(self, msg: Pose2D):
         self.current_state = np.array([msg.x, msg.y, msg.theta])
 
     def detect_callback(self, msg: Bool):
         if msg.data:
             if not self.image_detected:
                 self.image_detected = True
-                goal = TurtleBotState()
-                goal.x = float(self.current_state[0])
-                goal.y = float(self.current_state[1])
-                goal.theta = float(self.current_state[2])
+                goal = Pose2D(x=float(self.current_state[0]), y=float(self.current_state[1]), theta=float(self.current_state[2]))
                 self.cmd_nav_pub.publish(goal)
                 # five second timer before resuming:
                 self.stop_timer = self.create_timer(5.0, self.resume_after_stop)
@@ -79,7 +77,7 @@ class FrontierExplorer(Node):
             self.nav_success = False
 
     def nav_success_callback(self, msg: Bool):
-        self.nav_success = True
+        self.nav_success = bool(msg.data)
 
     def frontier(self, occupancy: StochOccupancyGrid2D):
         if self.occupancy is None or self.current_state is None:
@@ -113,17 +111,19 @@ class FrontierExplorer(Node):
         idx = np.argmin(distances)
         frontier = frontier_states[idx]
 
-        goal = TurtleBotState()
-        goal.x = float(frontier[0])
-        goal.y = float(frontier[1])
+        goal = Pose2D(x=float(frontier[0]), y=float(frontier[1]), theta=0.0)
         self.cmd_nav_pub.publish(goal)
         self.get_logger().info(f"Publishing frontier goal to /cmd_nav: ({goal.x:.2f}, {goal.y:.2f})")
 
+def main(argv=None):
+    rclpy.init(args=argv)
+    node = FrontierExplorer()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
 if __name__ == "__main__":
-    rclpy.init()
-
-    frontierexplorer_node = FrontierExplorer()
-
-    rclpy.spin(frontierexplorer_node)
-
-    rclpy.shutdown()
+    main()

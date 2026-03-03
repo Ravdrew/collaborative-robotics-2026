@@ -1,21 +1,52 @@
 #!/usr/bin/env python3
-# Turtlebot code from ME274A
+# Navigation code (TidyBot2 A* trajectory tracking)
 
-from turtle import width
 import numpy as np
 import typing as T
-import rclpy                    # ROS2 client library
 from numpy import linalg
-from rclpy.node import Node     # ROS2 node baseclass
 from scipy.interpolate import splev, splrep
 import matplotlib.pyplot as plt
 
-from asl_tb3_lib.navigation import BaseNavigator
-from asl_tb3_lib.math_utils import wrap_angle
-from asl_tb3_lib.tf_utils import quaternion_to_yaw
-from asl_tb3_lib.navigation import TrajectoryPlan
-from asl_tb3_msgs.msg import TurtleBotControl, TurtleBotState
-from asl_tb3_lib.grids import snap_to_grid, StochOccupancyGrid2D
+# Make ROS and ASL-specific imports optional so A* can be tested standalone
+try:
+    import time
+    import math
+    import rclpy                    # ROS2 client library
+    from rclpy.node import Node     # ROS2 node baseclass
+    from asl_tb3_lib.navigation import BaseNavigator, TrajectoryPlan
+    from asl_tb3_lib.math_utils import wrap_angle # robot-agnostic
+    from asl_tb3_lib.tf_utils import quaternion_to_yaw # robot-agnostic
+    from geometry_msgs.msg import Pose2D, Twist
+    from nav_msgs.msg import Odometry, OccupancyGrid
+    from std_msgs.msg import Bool
+    from asl_tb3_lib.grids import snap_to_grid, StochOccupancyGrid2D # robot-agnostic
+    ROS_AVAILABLE = True
+except Exception:
+    # If ROS or ASL libraries are not present, allow importing AStar for testing
+    import time
+    import math
+    ROS_AVAILABLE = False
+
+    # Distinct dummy base classes so `class Navigator(Node, BaseNavigator)` is valid
+    class Node:  # type: ignore[no-redef]
+        pass
+
+    class BaseNavigator:  # type: ignore[no-redef]
+        def __init__(self) -> None:
+            self.t_prev = 0.0
+            self.V_prev = 0.0
+            self.om_prev = 0.0
+
+    TrajectoryPlan = None
+    Pose2D = None
+    Twist = None
+    Odometry = None
+    OccupancyGrid = None
+    Bool = None
+    StochOccupancyGrid2D = None
+    # Provide a minimal snap_to_grid placeholder if needed by other code
+    def snap_to_grid(x):
+        return x
 
 class AStar(object):
     """Represents a motion planning problem to be solved using A*"""
@@ -234,11 +265,11 @@ class AStar(object):
         ########## Code ends here ##########
 
 #----------------------------------------------------------------------------------------------------------
-class Navigator(BaseNavigator):
+class Navigator(Node, BaseNavigator):
     def __init__(self, kpx: float = 6.0, kpy: float = 6.0, kdx: float = 3.0, kdy: float = 3.0,
                  V_max: float = 0.5, om_max: float = 1.0) -> None:
-        # call the parent's init method
-        super().__init__()
+        Node.__init__(self, 'astar_navigator')
+        BaseNavigator.__init__(self)
         # set the proportional control gain
         self.kp = 2.0
         # set the constants for trajectory tracking
@@ -247,9 +278,33 @@ class Navigator(BaseNavigator):
         self.kdx = kdx
         self.kdy = kdy
         self.V_max = V_max
-        # self.om_max = om_max
+        self.om_max = om_max
         self.V_PREV_THRES = 0.0001
-    
+
+        # Subscriptions
+        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.goal_sub = self.create_subscription(Pose2D, '/cmd_nav', self.goal_callback, 10)
+        self.goal_sub_legacy = self.create_subscription(Pose2D, '/nav_goal', self.goal_callback, 10)
+        self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 10)
+
+        # Publishers
+        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.end_pose_pub = self.create_publisher(Pose2D, '/end_nav_pose', 10)
+        self.nav_success_pub = self.create_publisher(Bool, '/nav_success', 10)
+
+        # Internal state
+        self.current_state = None
+        self.occupancy = None
+        self.current_plan = None
+        self.active_goal = None
+        self.plan_start_time = None
+        self.plan_active = False
+        self.goal_tolerance = 0.05    # metres
+        self.yaw_tolerance  = 0.05    # radians
+
+        self.create_timer(0.02, self.control_loop)
+        self.get_logger().info('A* Navigator ready')
+
     def reset(self) -> None:
         """ Reset internal variables for trajectory tracking controller """
         self.t_prev = 0.0
@@ -257,39 +312,38 @@ class Navigator(BaseNavigator):
         self.om_prev = 0.0
         
     # override the compute_heading_control() method from BaseHeadingController
-    def compute_heading_control(self, state: TurtleBotState, goal: TurtleBotState) -> TurtleBotControl:
+    #change to tidybot control and state
+    def compute_heading_control(self, state: Pose2D, goal: Pose2D) -> Twist:
         # compute the heading error
         heading_error = wrap_angle(goal.theta - state.theta)
 
         # required angular velocity
         angular_velocity = self.kp * heading_error
-        # create a new TurtleBotControl message
-        control_msg = TurtleBotControl()
-        control_msg.omega = angular_velocity
-
-        return control_msg
+        # create a Twist message for angular velocity
+        cmd = Twist()
+        cmd.angular.z = float(angular_velocity)
+        return cmd
     
-    def compute_trajectory_tracking_control(self, state: TurtleBotState, plan: TrajectoryPlan, t: float) -> TurtleBotControl:
+    def compute_trajectory_tracking_control(self, state: Pose2D, plan: TrajectoryPlan, t: float) -> Twist:
         """ Compute control target using a trajectory tracking controller
 
         Args:
-            state (TurtleBotState): current robot state
+            state (Pose2D): current robot state (x, y, theta)
             plan (TrajectoryPlan): planned trajectory
             t (float): current timestep
 
         Returns:
-            TurtleBotControl: control command
+            Twist: control command (linear velocity, angular velocity)
         """
 
         dt = t - self.t_prev
-        traj = plan.desired_state(t)
 
-        # I want to calculate the below values with scipy.interpolate.splev to sample from spline parameters given by TrajectoryPlan
-        x_d = traj.x
-        xd_d = splev(t, plan.path_x_spline, der=1)
+        # Sample desired state and derivatives from spline parameters
+        x_d   = splev(t, plan.path_x_spline, der=0)
+        xd_d  = splev(t, plan.path_x_spline, der=1)
         xdd_d = splev(t, plan.path_x_spline, der=2)
-        y_d = traj.y
-        yd_d = splev(t, plan.path_y_spline, der=1)
+        y_d   = splev(t, plan.path_y_spline, der=0)
+        yd_d  = splev(t, plan.path_y_spline, der=1)
         ydd_d = splev(t, plan.path_y_spline, der=2)
 
         ########## Code starts here ##########
@@ -311,27 +365,26 @@ class Navigator(BaseNavigator):
         V = self.V_prev + a*dt
         ########## Code ends here ##########
 
-        # apply control limits (NOTE NOT USED HERE)
-        # V = np.clip(V, -self.V_max, self.V_max)
-        # om = np.clip(om, -self.om_max, self.om_max)
+        # apply control limits
+        V = np.clip(V, -self.V_max, self.V_max)
+        om = np.clip(om, -self.om_max, self.om_max)
 
         # save the commands that were applied and the time
         self.t_prev = t
         self.V_prev = V
         self.om_prev = om
 
-        control = TurtleBotControl()
-        control.v = V
-        control.omega = om
+        cmd = Twist()
+        cmd.linear.x = float(V)
+        cmd.angular.z = float(om)
+        return cmd
 
-        return control
-
-    def compute_trajectory_plan(self, state: TurtleBotState, goal: TurtleBotState, occupancy: StochOccupancyGrid2D, resolution: float, horizon: float) -> T.Optional[TrajectoryPlan]:
+    def compute_trajectory_plan(self, state: Pose2D, goal: Pose2D, occupancy: StochOccupancyGrid2D, resolution: float, horizon: float) -> T.Optional[TrajectoryPlan]:
         """ Compute a trajectory plan using A* and cubic spline fitting
         
         Args:
-            state (TurtleBotState): state
-            goal (TurtleBotState): goal
+            state (Pose2D): current robot state (x, y, theta)
+            goal (Pose2D): goal state (x, y, theta)
             occupancy (StochOccupancyGrid2D): occupancy
             resolution (float): resolution
             horizon (float): horizon
@@ -374,8 +427,127 @@ class Navigator(BaseNavigator):
         
         return plan
 
+    def odom_callback(self, msg: Odometry) -> None:
+        """Extract robot pose from odometry (matches TrajectoryTracker convention)."""
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        q = msg.pose.pose.orientation
+        theta = 2.0 * math.atan2(q.z, q.w) - math.pi / 2
+        self.current_state = Pose2D(x=float(x), y=float(y), theta=float(theta))
+
+    def map_callback(self, msg: OccupancyGrid) -> None:
+        """Convert ROS2 OccupancyGrid to StochOccupancyGrid2D for A* planning."""
+        self.occupancy = StochOccupancyGrid2D(
+            resolution=msg.info.resolution,
+            size_xy=np.array([msg.info.width, msg.info.height]),
+            origin_xy=np.array([msg.info.origin.position.x, msg.info.origin.position.y]),
+            window_size=3,
+            probs=msg.data,
+        )
+
+    def goal_callback(self, msg: Pose2D) -> None:
+        """Receive a navigation goal, run A*, and start trajectory tracking."""
+        if self.current_state is None or self.occupancy is None:
+            self.get_logger().warn('Goal received but state/map not yet available')
+            return
+        self.current_plan = self.compute_trajectory_plan(
+            self.current_state, msg, self.occupancy,
+            resolution=0.1, horizon=10.0,
+        )
+        if self.current_plan:
+            self.active_goal = msg
+            self.plan_start_time = time.time()
+            self.plan_active = True
+            self.get_logger().info(f'A* plan computed ({len(self.current_plan.path)} waypoints)')
+        else:
+            self.active_goal = None
+            self.get_logger().warn('A* failed to find a path to goal')
+
+    def control_loop(self) -> None:
+        """50 Hz control loop: track the current trajectory plan."""
+        if not self.plan_active or self.current_state is None:
+            return
+        # Naive stop condition: if we're within goal_tolerance, stop and report success.
+        if self.active_goal is not None:
+            dx = self.active_goal.x - self.current_state.x
+            dy = self.active_goal.y - self.current_state.y
+            if math.hypot(dx, dy) <= self.goal_tolerance:
+                self._finish_goal()
+                return
+        t = time.time() - self.plan_start_time
+        if t > self.current_plan.duration:
+            self._finish_goal()
+            return
+        cmd = self.compute_trajectory_tracking_control(self.current_state, self.current_plan, t)
+        self.cmd_vel_pub.publish(cmd)
+
+    def _finish_goal(self) -> None:
+        """Stop the robot and signal success to FrontierExplorer."""
+        self.cmd_vel_pub.publish(Twist())
+        pose = Pose2D(
+            x=self.current_state.x,
+            y=self.current_state.y,
+            theta=self.current_state.theta,
+        )
+        self.end_pose_pub.publish(pose)
+        self.nav_success_pub.publish(Bool(data=True))
+        self.plan_active = False
+        self.active_goal = None
+        self.get_logger().info('Goal reached')
+
+
+def main(argv=None):
+    """Entry point for running the Navigator as a ROS2 node or a standalone demo."""
+    if ROS_AVAILABLE:
+        rclpy.init(args=argv)
+        node = Navigator()
+        try:
+            rclpy.spin(node)
+        finally:
+            node.destroy_node()
+            rclpy.shutdown()
+    else:
+        print("ROS not available — running standalone A* test")
+        try:
+            from mod_asl3_lib.grids import StochOccupancyGrid2D
+        except Exception as e:
+            print("Could not import local StochOccupancyGrid2D:", e)
+            raise
+
+        resolution = 1.0
+        size_xy = np.array([20, 20], dtype=int)
+        origin_xy = np.array([0.0, 0.0])
+
+        probs = np.zeros(size_xy[0] * size_xy[1], dtype=float)
+        probs = probs.reshape((size_xy[1], size_xy[0]))
+        probs[8:12, 8:12] = 100.0
+        probs = probs.flatten().tolist()
+
+        occupancy = StochOccupancyGrid2D(
+            resolution=resolution,
+            size_xy=size_xy,
+            origin_xy=origin_xy,
+            window_size=3,
+            probs=probs,
+            thresh=0.5,
+        )
+
+        x_init = (1.0, 1.0)
+        x_goal = (18.0, 18.0)
+
+        astar = AStar(statespace_lo=(0.0, 0.0), statespace_hi=(20.0, 20.0),
+                      x_init=x_init, x_goal=x_goal, occupancy=occupancy, resolution=1.0)
+
+        found = astar.solve()
+        print("Found path:", found)
+        if found:
+            print(astar.path)
+            try:
+                astar.plot_path(fig_num=1)
+                plt.show()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
-    rclpy.init()
-    node = Navigator()
-    rclpy.spin(node)
-    rclpy.shutdown()
+    main()
