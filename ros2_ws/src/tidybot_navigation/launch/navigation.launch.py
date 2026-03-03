@@ -60,7 +60,7 @@ def launch_setup(context, *args, **kwargs):
             'use_sim_time': use_sim_time,
             'scan_time': 0.033,
             'range_min': 0.28,
-            'range_max': 5.0,
+            'range_max': 3.0,
             'scan_height': 100,
             'output_frame': scan_output_frame,
         }],
