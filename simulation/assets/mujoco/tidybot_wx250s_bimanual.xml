@@ -101,6 +101,11 @@
 
     <!-- Camera mount (attached underneath top bar) -->
     <mesh name="camera_mount" file="base/Camera_Mount_v3.stl" scale="0.001 0.001 0.001"/>
+
+    <!-- Lidar stack meshes -->
+    <mesh name="lidar_extrusion" file="base/2020_Aluminum_Extrusion_400mm.stl" scale="1 1 1"/>
+    <mesh name="lidar_mount" file="base/Lidar_Mount.stl" scale="1 1 1"/>
+    <mesh name="locobot_lidar" file="base/locobot_lidar.stl" scale="0.001 0.001 0.001"/>
   </asset>
 
   <worldbody>
@@ -162,9 +167,24 @@
       </body>
       </body>
 
+      <!-- ==================== LIDAR STACK ==================== -->
+      <body name="lidar_extrusion" pos="0 0.196 0.5471" euler="0 0 0">
+        <geom type="mesh" mesh="lidar_extrusion" contype="0" conaffinity="0" group="2" rgba="0.7529 0.7529 0.7529 1"/>
+
+        <body name="lidar_mount" pos="0 0 0.229" euler="0 0 0">
+          <!-- Match URDF visual compensation so model orientation stays unchanged -->
+          <geom type="mesh" mesh="lidar_mount" euler="-1.5708 0 0" contype="0" conaffinity="0" group="2" rgba="0.3 0.3 0.3 1"/>
+
+          <body name="lidar_link" pos="0 0 0.029" euler="0 0 1.5708">
+            <geom type="mesh" mesh="locobot_lidar" contype="0" conaffinity="0" group="2" rgba="0.3 0.3 0.3 1"/>
+            <site name="laser" pos="0 0 0" size="0.003" rgba="0 0 1 0.15"/>
+          </body>
+        </body>
+      </body>
+
       <!-- ==================== RIGHT WX250s ARM ==================== -->
       <!-- 6-DOF arm: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate -->
-      <body name="right_arm_base_link" pos="-0.15 -0.1199 0.3847" euler="0 0 -1.5708">
+      <body name="right_arm_base_link" pos="-0.15 -0.1199 0.3817" euler="0 0 -1.5708">
         <geom type="mesh" mesh="wx250s_base" pos="-0.095773 0 -0.10565" quat="0.5 0.5 0.5 0.5"
               contype="0" conaffinity="0" group="2" rgba="0.3 0.3 0.3 1"/>
 
@@ -245,7 +265,7 @@
 
       <!-- ==================== LEFT WX250s ARM ==================== -->
       <!-- 6-DOF arm: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate -->
-      <body name="left_arm_base_link" pos="0.15 -0.1199 0.3847" euler="0 0 -1.5708">
+      <body name="left_arm_base_link" pos="0.15 -0.1199 0.3817" euler="0 0 -1.5708">
         <geom type="mesh" mesh="wx250s_base" pos="-0.095773 0 -0.10565" quat="0.5 0.5 0.5 0.5"
               contype="0" conaffinity="0" group="2" rgba="0.3 0.3 0.3 1"/>
 

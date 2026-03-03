@@ -105,6 +105,7 @@ class MotionPlannerRealNode(Node):
 
         # Process xacro to URDF if needed
         urdf_string = self._process_xacro(urdf_path)
+        self._description_pkg_dir = urdf_path.parent.parent
 
         # Load Pinocchio model from URDF string
         self.get_logger().info(f'Loading URDF: {urdf_path}')
@@ -170,6 +171,17 @@ class MotionPlannerRealNode(Node):
             if self.model.existFrame(fname):
                 self.base_collision_frame_ids.append(self.model.getFrameId(fname))
 
+        # Build geometry model for model-based distance checking.
+        # The URDF has arm meshes under <visual> tags; we use those meshes
+        # to compute distances between actual link shapes.
+        self.geom_model = None
+        self.geom_data = None
+        self.distance_pair_indices = []
+        self.inter_arm_pair_indices = []
+        self.arm_base_pair_indices = []
+        self.geometry_available = False
+        self._init_geometry_distance_model(urdf_string)
+
         # Current joint states
         self.current_joint_positions = {}
         self.joint_lock = Lock()
@@ -213,6 +225,99 @@ class MotionPlannerRealNode(Node):
         else:
             # Read URDF directly
             return xacro_path.read_text()
+
+    def _init_geometry_distance_model(self, urdf_string: str):
+        """Initialize Pinocchio geometry model for mesh-based distance checks."""
+        try:
+            # Resolve package URIs to absolute paths for geometry parsing.
+            # Example:
+            #   package://tidybot_description/meshes/foo.stl
+            # -> /.../tidybot_description/meshes/foo.stl
+            pkg_uri = 'package://tidybot_description'
+            urdf_geom = urdf_string.replace(pkg_uri, str(self._description_pkg_dir))
+
+            self.geom_model = pin.buildGeomFromUrdfString(
+                self.model, urdf_geom, pin.GeometryType.VISUAL, []
+            )
+
+            right_geom_ids = []
+            left_geom_ids = []
+            base_geom_ids = []
+            right_frames = set(self.collision_frames['right'])
+            left_frames = set(self.collision_frames['left'])
+            base_frames = set(self.base_collision_frames)
+
+            for gid, gobj in enumerate(self.geom_model.geometryObjects):
+                if gobj.parentFrame >= len(self.model.frames):
+                    continue
+                frame_name = self.model.frames[gobj.parentFrame].name
+                if frame_name in right_frames:
+                    right_geom_ids.append(gid)
+                elif frame_name in left_frames:
+                    left_geom_ids.append(gid)
+                elif frame_name in base_frames:
+                    base_geom_ids.append(gid)
+
+            # Build geometry pairs we care about:
+            # - right arm vs left arm
+            # - each arm vs base bodies (excluding same-side arm base link)
+            arm_geom_ids = right_geom_ids + left_geom_ids
+            for gid_right in right_geom_ids:
+                for gid_left in left_geom_ids:
+                    pair = pin.CollisionPair(gid_right, gid_left)
+                    self.geom_model.addCollisionPair(pair)
+                    pair_idx = len(self.geom_model.collisionPairs) - 1
+                    self.distance_pair_indices.append(pair_idx)
+                    self.inter_arm_pair_indices.append(pair_idx)
+
+            for gid_arm in arm_geom_ids:
+                for gid_base in base_geom_ids:
+                    arm_frame_name = self.model.frames[
+                        self.geom_model.geometryObjects[gid_arm].parentFrame
+                    ].name
+                    base_frame_name = self.model.frames[
+                        self.geom_model.geometryObjects[gid_base].parentFrame
+                    ].name
+
+                    # Skip same-side arm vs its own mounting frame; these links are
+                    # intentionally close due kinematic attachment.
+                    if arm_frame_name.startswith('right_') and base_frame_name == 'right_arm_base_link':
+                        continue
+                    if arm_frame_name.startswith('left_') and base_frame_name == 'left_arm_base_link':
+                        continue
+
+                    pair = pin.CollisionPair(gid_arm, gid_base)
+                    self.geom_model.addCollisionPair(pair)
+                    pair_idx = len(self.geom_model.collisionPairs) - 1
+                    self.distance_pair_indices.append(pair_idx)
+                    self.arm_base_pair_indices.append(pair_idx)
+
+            self.geom_data = pin.GeometryData(self.geom_model)
+            self.geometry_available = len(self.distance_pair_indices) > 0
+            if self.geometry_available:
+                self.get_logger().info(
+                    f'Geometry distance model enabled with {len(self.distance_pair_indices)} pairs '
+                    f'(inter-arm={len(self.inter_arm_pair_indices)}, '
+                    f'arm-base={len(self.arm_base_pair_indices)}, '
+                    f'right geoms={len(right_geom_ids)}, left geoms={len(left_geom_ids)}, '
+                    f'base geoms={len(base_geom_ids)})'
+                )
+            else:
+                self.get_logger().warn(
+                    'Geometry model loaded but no relevant geometry pairs were found; '
+                    'falling back to frame-origin distance checks.'
+                )
+        except Exception as e:
+            self.geometry_available = False
+            self.geom_model = None
+            self.geom_data = None
+            self.distance_pair_indices = []
+            self.inter_arm_pair_indices = []
+            self.arm_base_pair_indices = []
+            self.get_logger().warn(
+                f'Failed to initialize geometry distance model ({e}); '
+                'falling back to frame-origin distance checks.'
+            )
 
     def joint_state_callback(self, msg: JointState):
         """Update current joint positions from joint states."""
@@ -321,7 +426,7 @@ class MotionPlannerRealNode(Node):
 
         # Also set the other arm to current position for collision checking
         other_arm = 'left' if arm_name == 'right' else 'right'
-        other_positions = self.get_arm_joint_positions(other_arm)
+        other_positions = self.get_arm_joint_positions(other_arm, use_default_if_zero=False)
         self.set_arm_configuration(q, other_arm, other_positions)
 
         # Get end-effector frame ID
@@ -454,8 +559,57 @@ class MotionPlannerRealNode(Node):
         """
         Check for collision between the two arms.
 
+        Uses model-based distance checks on actual link geometry when available.
+        Falls back to frame-origin distance checks if geometry initialization fails.
+
         Returns: (collision_free, min_distance)
         """
+        if self.geometry_available:
+            return self._check_arm_collision_geometry(joint_positions_right, joint_positions_left)
+        return self._check_arm_collision_frames(joint_positions_right, joint_positions_left)
+
+    def _check_arm_collision_geometry(self, joint_positions_right: np.ndarray,
+                                      joint_positions_left: np.ndarray) -> tuple:
+        """Model-based collision check using link mesh geometry distances."""
+        q = pin.neutral(self.model)
+        self.set_arm_configuration(q, 'right', joint_positions_right)
+        self.set_arm_configuration(q, 'left', joint_positions_left)
+
+        pin.forwardKinematics(self.model, self.data, q)
+        pin.updateFramePlacements(self.model, self.data)
+        pin.updateGeometryPlacements(self.model, self.data, self.geom_model, self.geom_data)
+
+        min_distance = float('inf')
+        min_inter_arm = float('inf')
+        min_arm_base = float('inf')
+        inter_arm_pair_set = set(self.inter_arm_pair_indices)
+        arm_base_pair_set = set(self.arm_base_pair_indices)
+
+        for pair_idx in self.distance_pair_indices:
+            pin.computeDistance(self.geom_model, self.geom_data, pair_idx)
+            dist_result = self.geom_data.distanceResults[pair_idx]
+            dist = float(dist_result.min_distance)
+            if np.isfinite(dist):
+                min_distance = min(min_distance, dist)
+                if pair_idx in inter_arm_pair_set:
+                    min_inter_arm = min(min_inter_arm, dist)
+                elif pair_idx in arm_base_pair_set:
+                    min_arm_base = min(min_arm_base, dist)
+
+        if min_distance == float('inf'):
+            min_distance = 1.0  # No valid pairs/distances = safe
+
+        # Inter-arm keeps configured safety margin.
+        # Arm-base only enforces non-penetration to avoid false positives from
+        # intentionally tight clearances around the arm mounts.
+        inter_arm_ok = (min_inter_arm == float('inf')) or (min_inter_arm >= self.min_collision_distance)
+        arm_base_ok = (min_arm_base == float('inf')) or (min_arm_base >= 0.0)
+        collision_free = inter_arm_ok and arm_base_ok
+        return collision_free, min_distance
+
+    def _check_arm_collision_frames(self, joint_positions_right: np.ndarray,
+                                    joint_positions_left: np.ndarray) -> tuple:
+        """Fallback: frame-origin distance check."""
         q = pin.neutral(self.model)
         self.set_arm_configuration(q, 'right', joint_positions_right)
         self.set_arm_configuration(q, 'left', joint_positions_left)
@@ -501,7 +655,7 @@ class MotionPlannerRealNode(Node):
         # Get current joint positions as primary seed
         primary_seed = self.get_arm_joint_positions(arm_name)
         other_arm = 'left' if arm_name == 'right' else 'right'
-        other_arm_positions = self.get_arm_joint_positions(other_arm)
+        other_arm_positions = self.get_arm_joint_positions(other_arm, use_default_if_zero=False)
 
         # Convert target pose to SE3
         target_se3 = self.pose_to_se3(request.target_pose)

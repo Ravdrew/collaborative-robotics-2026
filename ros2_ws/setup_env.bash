@@ -70,14 +70,14 @@ export TIDYBOT2_PATH="/home/locobot/tidybot2"
 echo "✓ Set TIDYBOT2_PATH=$TIDYBOT2_PATH"
 
 # 4. Build and source the ROS2 workspace
-if [ -f "$SCRIPT_DIR/install/setup.bash" ]; then
-    source "$SCRIPT_DIR/install/setup.bash"
+if [ -f "$SCRIPT_DIR/install/local_setup.bash" ]; then
+    source "$SCRIPT_DIR/install/local_setup.bash"
     echo "✓ Sourced ROS2 workspace (ros2_ws)"
 else
     echo "⚠ Workspace not built yet, running 'colcon build'..."
     (cd "$SCRIPT_DIR" && colcon build)
-    if [ -f "$SCRIPT_DIR/install/setup.bash" ]; then
-        source "$SCRIPT_DIR/install/setup.bash"
+    if [ -f "$SCRIPT_DIR/install/local_setup.bash" ]; then
+        source "$SCRIPT_DIR/install/local_setup.bash"
         echo "✓ Built and sourced ROS2 workspace (ros2_ws)"
     else
         echo "✗ Failed to build workspace"
