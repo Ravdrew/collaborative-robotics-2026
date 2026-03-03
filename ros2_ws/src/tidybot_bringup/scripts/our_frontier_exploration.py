@@ -77,7 +77,7 @@ class FrontierExplorer(Node):
             self.nav_success = False
 
     def nav_success_callback(self, msg: Bool):
-        self.nav_success = True
+        self.nav_success = bool(msg.data)
 
     def frontier(self, occupancy: StochOccupancyGrid2D):
         if self.occupancy is None or self.current_state is None:

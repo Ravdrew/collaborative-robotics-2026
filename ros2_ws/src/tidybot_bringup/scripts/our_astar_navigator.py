@@ -296,6 +296,7 @@ class Navigator(Node, BaseNavigator):
         self.current_state = None
         self.occupancy = None
         self.current_plan = None
+        self.active_goal = None
         self.plan_start_time = None
         self.plan_active = False
         self.goal_tolerance = 0.05    # metres
@@ -454,16 +455,25 @@ class Navigator(Node, BaseNavigator):
             resolution=0.1, horizon=10.0,
         )
         if self.current_plan:
+            self.active_goal = msg
             self.plan_start_time = time.time()
             self.plan_active = True
             self.get_logger().info(f'A* plan computed ({len(self.current_plan.path)} waypoints)')
         else:
+            self.active_goal = None
             self.get_logger().warn('A* failed to find a path to goal')
 
     def control_loop(self) -> None:
         """50 Hz control loop: track the current trajectory plan."""
         if not self.plan_active or self.current_state is None:
             return
+        # Naive stop condition: if we're within goal_tolerance, stop and report success.
+        if self.active_goal is not None:
+            dx = self.active_goal.x - self.current_state.x
+            dy = self.active_goal.y - self.current_state.y
+            if math.hypot(dx, dy) <= self.goal_tolerance:
+                self._finish_goal()
+                return
         t = time.time() - self.plan_start_time
         if t > self.current_plan.duration:
             self._finish_goal()
@@ -482,6 +492,7 @@ class Navigator(Node, BaseNavigator):
         self.end_pose_pub.publish(pose)
         self.nav_success_pub.publish(Bool(data=True))
         self.plan_active = False
+        self.active_goal = None
         self.get_logger().info('Goal reached')
 
 
