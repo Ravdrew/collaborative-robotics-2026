@@ -21,7 +21,7 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import Image, CameraInfo
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import PointStamped, Pose
 
 from cv_bridge import CvBridge
 import cv2
@@ -59,10 +59,10 @@ class FruitTargetNode(Node):
         # Default: lightweight COCO model (has "banana" and "apple")
         # You can change to "yolov8m.pt" etc. if you want better accuracy.
         import os
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(script_dir, "yolov8n.pt")
-        self.get_logger().info(f"Loading YOLO model: {model_path}")
-        self.model = YOLO(model_path)
+        # script_dir = os.path.dirname(os.path.abspath(__file__))
+        # model_path = os.path.join(script_dir, "yolov8n.pt")
+        # self.get_logger().info(f"Loading YOLO model: {model_path}")
+        self.model = YOLO("yolov8n.pt")
 
         # COCO class names we want
         self.target_classes = {"banana", "apple", "bowl"}

@@ -39,6 +39,7 @@ install(PROGRAMS
   scripts/our_state_machine.py
   scripts/trajectory_tracking.py
   scripts/our_hand_tracking.py
+  scripts/fruit_detection.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

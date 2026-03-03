@@ -159,7 +159,7 @@ class GraspNode(Node):
         self.create_subscription(Pose,       '/pick_target_local',   self._on_pick_target,   10)
         self.create_subscription(Pose,       '/EEF_pose_command',    self._on_eef_pose,       10)
         self.create_subscription(JointState, '/joint_states',        self._on_joint_states,   10)
-        self.create_subscription(Float64,    '/fsm_pick_request',    self._on_pick_start, 10)
+        self.create_subscription(Bool,       '/fsm_pick_request',    self._on_pick_start, 10)
 
         # ------------------------------------------------------------------
         # Service client
@@ -200,6 +200,7 @@ class GraspNode(Node):
 
     def _on_pick_target(self, msg: Pose) -> None:
         self._pick_target_pose = msg
+        self.get_logger().info("received")
     
     def _on_pick_start(self, msg: Bool) -> None:
         """Received a new pick command. Only act when idle."""
