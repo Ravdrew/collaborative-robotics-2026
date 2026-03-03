@@ -2,6 +2,28 @@
 
 This guide explains how to control TidyBot2 remotely over the network using native ROS2.
 
+## Table of Contents
+
+- [Architecture Overview](#architecture-overview)
+- [Key Principle: Sim-to-Real Topic Compatibility](#key-principle-sim-to-real-topic-compatibility)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Launch File Reference](#launch-file-reference)
+- [Network Configuration Options](#network-configuration-options)
+  - [Option A: Cyclone DDS with Multicast](#option-a-cyclone-dds-with-multicast-simplest)
+  - [Option B: FastDDS Discovery Server](#option-b-fastdds-discovery-server-works-across-subnets)
+  - [Option C: Zenoh Bridge](#option-c-zenoh-bridge-enterprise-grade)
+  - [Option D: Tailscale VPN](#option-d-tailscale-vpn-remote-access-from-anywhere)
+- [ROS2 Topics Reference](#ros2-topics-reference)
+- [Example: Python Control Script](#example-python-control-script)
+- [Visualization with RViz](#visualization-with-rviz)
+- [Hardware Details](#hardware-details)
+- [Environment Variables Summary](#environment-variables-summary)
+- [Remote GPU Training over Tailscale](#remote-gpu-training-over-tailscale)
+- [Security Notes](#security-notes)
+- [Further Reading](#further-reading)
+- [Troubleshooting](#troubleshooting)
+
 ## Architecture Overview
 
 ```
@@ -662,6 +684,86 @@ export FASTRTPS_DEFAULT_PROFILES_FILE=/path/to/config.xml
 export TIDYBOT2_PATH=/home/locobot/tidybot2
 export TIDYBOT_REPO_ROOT=/home/locobot/collaborative-robotics-2026
 ```
+
+## Remote GPU Training over Tailscale
+
+Use a remote GPU workstation for training and inference without needing ROS2 on the GPU side. The robot pushes data over Tailscale via SSH/SCP, triggers a job, and pulls results back. **All commands run from the robot.**
+
+### Architecture
+
+```
+ROBOT (100.106.67.118)                       GPU COMPUTER (100.77.113.90)
+┌──────────────────────┐                     ┌──────────────────────────┐
+│                      │   1. push data      │                          │
+│ ./gpu_runner.sh push ├────────────────────→│ ~/gpu_workspace/data/    │
+│                      │   (scp/rsync)       │                          │
+│                      │                     │                          │
+│ ./gpu_runner.sh run  │   2. SSH + tmux     │  python3 train.py       │
+│ "python3 train.py"  ├────────────────────→│  (runs on GPU)           │
+│                      │                     │                          │
+│ ./gpu_runner.sh pull │   3. pull results   │                          │
+│ ~/gpu_workspace/res/ │←────────────────────┤ ~/gpu_workspace/results/ │
+└──────────────────────┘   (scp/rsync)       └──────────────────────────┘
+```
+
+No ROS2, Cyclone DDS, or domain IDs needed on the GPU side — just Tailscale + SSH + Python/CUDA.
+
+### One-Time Setup
+
+**GPU computer** (do once, then never touch again):
+```bash
+# 1. Install Tailscale and authenticate with the SAME account as the robot
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# 2. Install tmux, Python, PyTorch + CUDA
+sudo apt install -y tmux
+pip install torch torchvision numpy
+
+# 3. Create workspace
+mkdir -p ~/gpu_workspace
+```
+
+**Robot**:
+```bash
+# 1. Set up passwordless SSH to GPU computer
+ssh-keygen -t ed25519           # Enter through all prompts (no passphrase)
+ssh-copy-id giuse@100.77.113.90 # Enter GPU password once
+
+# 2. Get gpu_runner.sh (from the GPU computer)
+scp giuse@100.77.113.90:/home/giuse/Documents/tailscale/gpu_runner.sh ~/gpu_runner.sh
+chmod +x ~/gpu_runner.sh
+```
+
+### Usage (from the robot)
+
+```bash
+# Push data and scripts to GPU
+./gpu_runner.sh push ./collected_images/
+./gpu_runner.sh push ./train.py
+
+# Run training on GPU
+./gpu_runner.sh run "cd ~/gpu_workspace && python3 train.py --data collected_images/ --output results/"
+
+# Monitor
+./gpu_runner.sh status    # check if running
+./gpu_runner.sh logs      # view live output (Ctrl+B then D to detach)
+./gpu_runner.sh stop      # kill the job
+
+# Pull results back
+./gpu_runner.sh pull ~/gpu_workspace/results/ ./results/
+```
+
+### GPU Computer Details
+
+| Property | Value |
+|----------|-------|
+| Tailscale IP | `100.77.113.90` |
+| SSH user | `giuse` |
+| Workspace | `~/gpu_workspace/` |
+| tmux session | `gpu_job` |
+
+See the full setup guide and template script at `/home/giuse/Documents/tailscale/README.md` on the GPU computer.
 
 ## Security Notes
 
