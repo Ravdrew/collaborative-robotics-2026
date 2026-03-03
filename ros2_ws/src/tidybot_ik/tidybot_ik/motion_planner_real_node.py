@@ -29,6 +29,7 @@ import tempfile
 import os
 
 import pinocchio as pin
+import jparse_robotics as jparse
 
 import rclpy
 from rclpy.node import Node
@@ -201,6 +202,10 @@ class MotionPlannerRealNode(Node):
         self.plan_service = self.create_service(
             PlanToTarget, '/plan_to_target', self.plan_to_target_callback
         )
+
+        # Initialize J-PARSE solver for singularity avoidance
+        self.jparse_solver = jparse.JParseCore(gamma=0.1)
+        self.get_logger().info('Initialized J-PARSE solver for singularity avoidance (gamma=0.1)')
 
         self.get_logger().info('Motion planner (real hardware) initialized')
         self.get_logger().info('Service: /plan_to_target')
@@ -485,13 +490,19 @@ class MotionPlannerRealNode(Node):
                 J = self.numerical_jacobian(q, arm_name, ee_frame_id, use_orientation=False)
                 dim = 3
 
-            # Damped least squares
-            JJT = J @ J.T + self.ik_damping * np.eye(dim)
-
+            # Compute pseudo-inverse with J-PARSE for singularity avoidance
             try:
-                v = J.T @ np.linalg.solve(JJT, error_vec)
-            except np.linalg.LinAlgError:
-                break
+                # Use J-PARSE solver to compute pseudo-inverse
+                J_parse = self.jparse_solver.compute(J)
+                v = J_parse @ error_vec
+            except (np.linalg.LinAlgError, ValueError):
+                # Fallback to damped least squares if J-PARSE fails
+                self.get_logger().debug('J-PARSE computation failed, falling back to DLS')
+                JJT = J @ J.T + self.ik_damping * np.eye(dim)
+                try:
+                    v = J.T @ np.linalg.solve(JJT, error_vec)
+                except np.linalg.LinAlgError:
+                    break
 
             # Update arm joints with joint limit clamping
             for i, idx_q in enumerate(arm_idx_q):

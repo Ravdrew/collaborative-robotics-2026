@@ -19,6 +19,8 @@ dependencies = [
     "hpp-fcl>=2.4.0",
     "qpsolvers>=4.5.0",
     "quadprog>=0.1.13",
+    # Singularity avoidance
+    "jparse-robotics>=0.1.0",
     # Hardware (for real robot)
     "pyrealsense2>=2.55.0",
     "catkin-pkg>=1.1.0",
