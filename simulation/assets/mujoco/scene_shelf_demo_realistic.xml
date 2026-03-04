@@ -1,0 +1,147 @@
+<mujoco model="tidybot shelf demo realistic">
+  <include file="tidybot_wx250s_bimanual.xml"/>
+
+  <compiler texturedir="../textures/"/>
+
+  <statistic center="0 0 0.525" extent="1.1" meansize="0.05"/>
+
+  <visual>
+    <!-- Softer headlight to let scene lights dominate -->
+    <headlight diffuse="0.3 0.3 0.3" ambient="0.15 0.15 0.18" specular="0.1 0.1 0.1"/>
+    <rgba haze="0.12 0.18 0.25 1"/>
+    <global azimuth="140" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <!-- Skybox: soft overcast/indoor look -->
+    <texture type="skybox" builtin="flat" rgb1="0.75 0.78 0.82" rgb2="0.5 0.5 0.52"
+             width="512" height="512"/>
+
+    <!-- Floor texture: tile / linoleum -->
+    <texture type="2d" name="floor_tex" file="tile_floor.png"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="6 6"
+              texuniform="true" reflectance="0.12" specular="0.4" shininess="0.25"/>
+
+    <!-- Wall texture: off-white painted drywall -->
+    <texture type="2d" name="wall_tex" file="wall_paint.png"/>
+    <material name="wall_mat" texture="wall_tex" texrepeat="4 4"
+              texuniform="true" specular="0.1" shininess="0.05"/>
+
+    <!-- Ceiling texture -->
+    <texture type="2d" name="ceiling_tex" file="ceiling.png"/>
+    <material name="ceiling_mat" texture="ceiling_tex" texrepeat="3 3"
+              texuniform="true" specular="0.05" shininess="0.02"/>
+
+    <!-- Shelf texture: darker walnut wood planks -->
+    <texture type="2d" name="shelf_tex" file="wood_shelf.png"/>
+    <material name="wood_material" texture="shelf_tex" texrepeat="2 4"
+              specular="0.35" shininess="0.2"/>
+
+    <!-- Baseboard trim -->
+    <material name="baseboard_mat" rgba="0.92 0.90 0.88 1"
+              specular="0.3" shininess="0.2"/>
+
+    <!-- Water bottle mesh and materials (glossy plastic look) -->
+    <mesh name="water_bottle" file="../meshes/objects/water_bottle.obj"/>
+    <!-- Clear plastic with light blue tint (like Aquafina/Dasani) -->
+    <material name="bottle_blue" rgba="0.72 0.82 0.92 0.70"
+              specular="0.9" shininess="0.85" reflectance="0.05"/>
+    <!-- Clear plastic with light green tint (like Poland Spring) -->
+    <material name="bottle_green" rgba="0.75 0.90 0.78 0.70"
+              specular="0.9" shininess="0.85" reflectance="0.05"/>
+  </asset>
+
+  <worldbody>
+    <!-- ============================================================ -->
+    <!-- Three-point lighting setup for indoor realism                -->
+    <!-- ============================================================ -->
+
+    <!-- Key light: warm overhead, slightly from front-right (simulates ceiling fixture) -->
+    <light name="key_light" pos="0.5 -0.5 2.4" dir="0.1 0.2 -1" directional="false"
+           diffuse="0.85 0.80 0.72" ambient="0.10 0.10 0.13" specular="0.3 0.3 0.3"
+           castshadow="true" cutoff="60"/>
+
+    <!-- Fill light: cooler, from left side (simulates window light) -->
+    <light name="fill_light" pos="-0.5 1.5 2.0" dir="0.3 -0.5 -0.8" directional="false"
+           diffuse="0.35 0.38 0.45" ambient="0.05 0.05 0.06" specular="0.1 0.1 0.1"
+           castshadow="false" cutoff="70"/>
+
+    <!-- Back/rim light: highlights shelf and objects from behind -->
+    <light name="back_light" pos="2.5 0 2.2" dir="-0.8 0 -0.6" directional="false"
+           diffuse="0.25 0.25 0.28" specular="0.08 0.08 0.08"
+           castshadow="false" cutoff="80"/>
+
+    <!-- ============================================================ -->
+    <!-- Room structure: floor, walls, ceiling                        -->
+    <!-- Room: 4m x 3m x 2.5m (x: -0.5 to 3.5, y: -1.5 to 1.5)     -->
+    <!-- ============================================================ -->
+
+    <!-- Floor -->
+    <geom name="floor" type="box" size="2.0 1.5 0.01" pos="1.5 0 -0.01"
+          material="floor_mat" contype="1" conaffinity="1"/>
+
+    <!-- Back wall (behind shelf) -->
+    <geom name="wall_back" type="box" size="0.01 1.5 1.25" pos="3.5 0 1.25"
+          material="wall_mat" contype="0" conaffinity="0"/>
+
+    <!-- Left wall -->
+    <geom name="wall_left" type="box" size="2.0 0.01 1.25" pos="1.5 1.5 1.25"
+          material="wall_mat" contype="0" conaffinity="0"/>
+
+    <!-- Right wall -->
+    <geom name="wall_right" type="box" size="2.0 0.01 1.25" pos="1.5 -1.5 1.25"
+          material="wall_mat" contype="0" conaffinity="0"/>
+
+    <!-- Ceiling -->
+    <geom name="ceiling" type="box" size="2.0 1.5 0.01" pos="1.5 0 2.5"
+          material="ceiling_mat" contype="0" conaffinity="0"/>
+
+    <!-- Baseboards along walls -->
+    <geom name="baseboard_back" type="box" size="0.005 1.5 0.04" pos="3.49 0 0.04"
+          material="baseboard_mat" contype="0" conaffinity="0"/>
+    <geom name="baseboard_left" type="box" size="2.0 0.005 0.04" pos="1.5 1.49 0.04"
+          material="baseboard_mat" contype="0" conaffinity="0"/>
+    <geom name="baseboard_right" type="box" size="2.0 0.005 0.04" pos="1.5 -1.49 0.04"
+          material="baseboard_mat" contype="0" conaffinity="0"/>
+
+    <!-- ============================================================ -->
+    <!-- Shelf - positioned directly in front of the robot            -->
+    <!-- Open at the front and top for arm access                     -->
+    <!-- ============================================================ -->
+    <body name="shelf" pos="0.90 0 0">
+      <!-- Shelf platform at z=0.30 -->
+      <geom name="shelf_platform" type="box" size="0.10 0.20 0.01" pos="0 0 0.30"
+        material="wood_material" contype="1" conaffinity="1"/>
+      <!-- Left side panel -->
+      <geom name="shelf_left" type="box" size="0.10 0.01 0.16" pos="0 0.21 0.16"
+        material="wood_material" contype="1" conaffinity="1"/>
+      <!-- Right side panel -->
+      <geom name="shelf_right" type="box" size="0.10 0.01 0.16" pos="0 -0.21 0.16"
+        material="wood_material" contype="1" conaffinity="1"/>
+      <!-- Back panel -->
+      <geom name="shelf_back" type="box" size="0.01 0.22 0.16" pos="0.11 0 0.16"
+        material="wood_material" contype="1" conaffinity="1"/>
+    </body>
+
+    <!-- ============================================================ -->
+    <!-- Water bottles                                                -->
+    <!-- Mesh centered at origin, half-height=0.07m                   -->
+    <!-- pos z=0.07 puts bottom on ground                             -->
+    <!-- ============================================================ -->
+
+    <!-- Right object: blue water bottle - reachable by right arm -->
+    <body name="right_object" pos="0.38 -0.15 0.07">
+      <freejoint name="right_object_joint"/>
+      <geom name="right_object_geom" type="mesh" mesh="water_bottle" mass="0.10"
+        material="bottle_blue" friction="1.0 0.5 0.5" solref="0.01 1" solimp="0.99 0.99 0.001"/>
+    </body>
+
+    <!-- Left object: green water bottle - reachable by left arm -->
+    <body name="left_object" pos="0.38 0.15 0.07">
+      <freejoint name="left_object_joint"/>
+      <geom name="left_object_geom" type="mesh" mesh="water_bottle" mass="0.10"
+        material="bottle_green" friction="1.0 0.5 0.5" solref="0.01 1" solimp="0.99 0.99 0.001"/>
+    </body>
+  </worldbody>
+
+</mujoco>

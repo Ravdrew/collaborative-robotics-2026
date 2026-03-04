@@ -1,0 +1,58 @@
+<mujoco model="tidybot shelf demo">
+  <include file="tidybot_wx250s_bimanual.xml"/>
+
+  <statistic center="0 0 0.525" extent="1.1" meansize="0.05"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="140" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="3072"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4" rgb2="0.1 0.2 0.3"
+      markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.2"/>
+    <material name="red_material" rgba="0.85 0.15 0.15 1"/>
+    <material name="blue_material" rgba="0.15 0.25 0.85 1"/>
+    <material name="wood_material" rgba="0.65 0.45 0.25 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 1.5" directional="true"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+
+    <!-- Shelf - positioned directly in front of the robot -->
+    <!-- Open at the front and top for arm access -->
+    <body name="shelf" pos="0.90 0 0">
+      <!-- Shelf platform at z=0.30 -->
+      <geom name="shelf_platform" type="box" size="0.10 0.20 0.01" pos="0 0 0.30"
+        material="wood_material" contype="1" conaffinity="1"/>
+      <!-- Left side panel -->
+      <geom name="shelf_left" type="box" size="0.10 0.01 0.16" pos="0 0.21 0.16"
+        material="wood_material" contype="1" conaffinity="1"/>
+      <!-- Right side panel -->
+      <geom name="shelf_right" type="box" size="0.10 0.01 0.16" pos="0 -0.21 0.16"
+        material="wood_material" contype="1" conaffinity="1"/>
+      <!-- Back panel -->
+      <geom name="shelf_back" type="box" size="0.01 0.22 0.16" pos="0.11 0 0.16"
+        material="wood_material" contype="1" conaffinity="1"/>
+    </body>
+
+    <!-- Right object: red cylinder (soup can approximation) - reachable by right arm -->
+    <body name="right_object" pos="0.38 -0.15 0.03">
+      <freejoint name="right_object_joint"/>
+      <geom name="right_object_geom" type="cylinder" size="0.019 0.03" mass="0.08"
+        material="red_material" friction="1.0 0.5 0.5" solref="0.01 1" solimp="0.99 0.99 0.001"/>
+    </body>
+
+    <!-- Left object: blue box (small box approximation) - reachable by left arm -->
+    <body name="left_object" pos="0.38 0.15 0.019">
+      <freejoint name="left_object_joint"/>
+      <geom name="left_object_geom" type="box" size="0.009 0.015 0.019" mass="0.07"
+        material="blue_material" friction="1.0 0.5 0.5" solref="0.01 1" solimp="0.99 0.99 0.001"/>
+    </body>
+  </worldbody>
+
+</mujoco>

@@ -59,13 +59,13 @@ class TestBase(Node):
 
         self.get_logger().info('')
         self.get_logger().info('=' * 50)
-        self.get_logger().info('BASE TEST: Moving forward at 0.1 m/s for 1 second')
+        self.get_logger().info('BASE TEST: Moving forward at 0.1 m/s for 5 second')
         self.get_logger().info('=' * 50)
 
         vel = Twist()
         vel.linear.x = 0.1  # Forward 0.1 m/s
 
-        # Send velocity commands for 1 second
+        # Send velocity commands for 5 seconds
         start = time.time()
         while (time.time() - start) < 5.0:
             self.cmd_vel_pub.publish(vel)
