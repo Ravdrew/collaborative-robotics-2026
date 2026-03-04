@@ -154,7 +154,7 @@ class MotionPlannerNode(Node):
             self.freeze_vel_limits[arm] = mink.VelocityLimit(
                 self.model, vel_limits
             )
-                self.joint_dof_addrs[jname] = self.model.jnt_dofadr[jid]
+            self.joint_dof_addrs[jname] = self.model.jnt_dofadr[jid]
 
         # Base joint qpos addresses (needed for correct FK in IK solver)
         self.base_joint_names = ['joint_x', 'joint_y', 'joint_th']
@@ -410,15 +410,11 @@ class MotionPlannerNode(Node):
             return mink.SE3.from_rotation_and_translation(
                 rotation=world_rot,
                 translation=world_pos,
-                rotation=world_rot,
-                translation=world_pos,
             )
         else:
             # Use base orientation as default (so ee keeps pointing forward)
             # Use base orientation as default (so ee keeps pointing forward)
             return mink.SE3.from_rotation_and_translation(
-                rotation=base_rot,
-                translation=world_pos,
                 rotation=base_rot,
                 translation=world_pos,
             )
@@ -486,7 +482,6 @@ class MotionPlannerNode(Node):
                 dt=self.ik_dt,
                 solver="quadprog",
                 damping=1e-3,
-                limits=[self.freeze_vel_limits[arm_name]],
                 limits=[self.freeze_vel_limits[arm_name]],
             )
             self.configuration.integrate_inplace(vel, self.ik_dt)

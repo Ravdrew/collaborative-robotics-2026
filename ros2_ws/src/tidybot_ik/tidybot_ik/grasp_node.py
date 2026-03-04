@@ -90,16 +90,17 @@ _FINGER_OPEN_POS = 0.037
 
 
 class State(Enum):
-    IDLE              = auto()  # waiting for /pick_target_local
+    IDLE              = auto()  # waiting for /fsm_pick_request or /fsm_place_request
     WAIT_EEF_POSE     = auto()  # waiting for /EEF_pose_command after relaying pick target
     PLAN_GRASP        = auto()  # issuing /plan_to_target call (single entry tick)
     WAIT_PLAN_GRASP   = auto()  # waiting for plan failure OR EEF arrival at target
-    TOGGLE_GRIPPER     = auto()  # gripper closing, timing out
+    CLOSE_GRIPPER     = auto()  # sending close command for gripper_toggle_time seconds (pick)
+    OPEN_GRIPPER      = auto()  # sending open command for gripper_toggle_time seconds (place)
     PLAN_NEUTRAL      = auto()  # issuing /plan_to_target for retract (single entry tick)
     WAIT_PLAN_NEUTRAL = auto()  # waiting for retract future to resolve
     CHECK_GRASP       = auto()  # inspect finger position
-    DONE              = auto()  # grasp succeeded
-    FAILED            = auto()  # grasp failed
+    DONE              = auto()  # action succeeded
+    FAILED            = auto()  # action failed
 
 
 class GraspNode(Node):
@@ -123,9 +124,8 @@ class GraspNode(Node):
         self.declare_parameter('neutral_qy', _FINGERS_DOWN_HORIZONTAL[2])
         self.declare_parameter('neutral_qz', _FINGERS_DOWN_HORIZONTAL[3])
 
-        self.arm_name            = None
-        self.gripper_state       = 'open'
-        self.gripper_toggle_time  = self.get_parameter('gripper_toggle_time').get_parameter_value().double_value
+        self.arm_name               = None        
+        self.gripper_toggle_time    = self.get_parameter('gripper_toggle_time').get_parameter_value().double_value
         self.grasp_finger_threshold = self.get_parameter('grasp_finger_threshold').get_parameter_value().double_value
         self.eef_arrival_threshold  = self.get_parameter('eef_arrival_threshold').get_parameter_value().double_value
 
@@ -151,7 +151,8 @@ class GraspNode(Node):
         self._object_pose_pub   = self.create_publisher(Pose, '/object_pose_in_camera', 10)
         self._right_gripper_pub = self.create_publisher(Float64MultiArray, '/right_gripper/cmd', 10)
         self._left_gripper_pub  = self.create_publisher(Float64MultiArray, '/left_gripper/cmd', 10)
-        self._result_pub        = self.create_publisher(Bool, '/grasp_completed', 10)
+        self._pick_result_pub   = self.create_publisher(Bool, '/successful_pick', 10)
+        self._place_result_pub  = self.create_publisher(Bool, '/placing_done', 10)
 
         # ------------------------------------------------------------------
         # Subscribers
@@ -160,6 +161,7 @@ class GraspNode(Node):
         self.create_subscription(Pose,       '/EEF_pose_command',    self._on_eef_pose,       10)
         self.create_subscription(JointState, '/joint_states',        self._on_joint_states,   10)
         self.create_subscription(Bool,       '/fsm_pick_request',    self._on_pick_start, 10)
+        self.create_subscription(Bool,       '/fsm_place_request',   self._on_place_start, 10)
 
         # ------------------------------------------------------------------
         # Service client
@@ -176,7 +178,8 @@ class GraspNode(Node):
         self._plan_future      = None   # pending service call future
         self._plan_accepted    = False  # True once the planner has accepted the grasp request
         self._finger_pos       = None   # latest finger position (metres)
-        self._pick_target_pose = None   # pick target pose in camera_color_optical_frame
+        self._pick_target_pose = None   # most recent target pose in camera_color_optical_frame
+        self.action            = None   # 'pick' or 'place'
 
         # 20 Hz control loop
         self.create_timer(0.05, self._control_loop)
@@ -200,17 +203,32 @@ class GraspNode(Node):
 
     def _on_pick_target(self, msg: Pose) -> None:
         self._pick_target_pose = msg
-        self.get_logger().info("received")
     
     def _on_pick_start(self, msg: Bool) -> None:
-        """Received a new pick command. Only act when idle."""
-        if self._state not in (State.IDLE,):
-            self.get_logger().warn('Grasp already in progress — ignoring new pick target.')
+        """Received a pick command — move to target then CLOSE gripper."""
+        if self._state != State.IDLE:
+            self.get_logger().warn('Action already in progress — ignoring pick request.')
             return
         if self._pick_target_pose is None:
-            self.get_logger().warn('No pick target pose received — ignoring pick command.')
+            self.get_logger().warn('No pick target pose received yet — ignoring pick request.')
             return
-        self.get_logger().info('Pick command received — relaying to grasp_generation_node.')
+        self.get_logger().info('Pick request received — relaying to grasp_generation_node.')
+        self.action           = 'pick'
+        self._waiting_for_eef = True
+        self._eef_pose        = None
+        self._object_pose_pub.publish(self._pick_target_pose)
+        self._transition(State.WAIT_EEF_POSE)
+
+    def _on_place_start(self, msg: Bool) -> None:
+        """Received a place command — move to target then OPEN gripper."""
+        if self._state != State.IDLE:
+            self.get_logger().warn('Action already in progress — ignoring place request.')
+            return
+        if self._pick_target_pose is None:
+            self.get_logger().warn('No pick target pose received yet — ignoring place request.')
+            return
+        self.get_logger().info('Place request received — relaying to grasp_generation_node.')
+        self.action           = 'place'
         self._waiting_for_eef = True
         self._eef_pose        = None
         self._object_pose_pub.publish(self._pick_target_pose)
@@ -353,39 +371,42 @@ class GraspNode(Node):
                     f'(threshold: {self.eef_arrival_threshold:.3f} m)')
                 if dist < self.eef_arrival_threshold:
                     self.get_logger().info(
-                        f'EEF arrived at target (dist={dist:.4f} m). Closing gripper.')
-                    self._transition(State.TOGGLE_GRIPPER)
+                        f'EEF arrived at target (dist={dist:.4f} m). '
+                        f'Action: {self.action}.')
+                    next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
+                    self._transition(next_state)
                     return
 
             if self._elapsed() > 20.0:
                 self.get_logger().error('Timed out waiting for EEF to arrive.')
                 self._transition(State.FAILED)
 
-        # ── TOGGLE_GRIPPER ────────────────────────────────────────────────
-        elif self._state == State.TOGGLE_GRIPPER:
+        # ── CLOSE_GRIPPER (pick) ─────────────────────────────────────────
+        elif self._state == State.CLOSE_GRIPPER:
             elapsed = self._elapsed()
-            if self.gripper_state == 'closed':
-                if elapsed < 0.1:
-                    self.get_logger().info('Opening gripper ...')
-                self._send_gripper(_GRIPPER_OPEN)
-            else:
-                if elapsed < 0.1:
-                    self.get_logger().info('Closing gripper ...')
-                self._send_gripper(_GRIPPER_CLOSED)
+            if elapsed < 0.1:
+                self.get_logger().info('Closing gripper ...')
+            self._send_gripper(_GRIPPER_CLOSED)
             if elapsed > self.gripper_toggle_time:
-                if self.gripper_state == 'closed': 
-                    self.gripper_state = 'open'
-                    self.get_logger().info('Gripper opened')
-                else: 
-                    self.gripper_state = 'closed'
-                    self.get_logger().info('Gripper closed')
-                self._transition(State.PLAN_NEUTRAL)   
-                return
+                self.get_logger().info('Gripper closed.')
+                self._transition(State.PLAN_NEUTRAL)
+
+        # ── OPEN_GRIPPER (place) ─────────────────────────────────────────
+        elif self._state == State.OPEN_GRIPPER:
+            elapsed = self._elapsed()
+            if elapsed < 0.1:
+                self.get_logger().info('Opening gripper ...')
+            self._send_gripper(_GRIPPER_OPEN)
+            if elapsed > self.gripper_toggle_time:
+                self.get_logger().info('Gripper opened.')
+                self._transition(State.PLAN_NEUTRAL)
 
         # ── PLAN_NEUTRAL (single entry tick) ─────────────────────────────
         elif self._state == State.PLAN_NEUTRAL:
             if self.arm_name == 'left':
-                self._neutral_pose.position.x = -self._neutral_pose.position.x
+                self._neutral_pose.position.x = abs(self._neutral_pose.position.x)
+            else:
+                self._neutral_pose.position.x = -abs(self._neutral_pose.position.x)
             self.get_logger().info(
                 f'Retracting to neutral pose '
                 f'({self._neutral_pose.position.x:.2f}, '
@@ -416,6 +437,12 @@ class GraspNode(Node):
 
         # ── CHECK_GRASP ──────────────────────────────────────────────────
         elif self._state == State.CHECK_GRASP:
+
+            if self.action == 'place':
+                self.get_logger().info('Place action — skipping grasp check.')
+                self._transition(State.DONE)
+                return
+
             if self._finger_pos is None:
                 self.get_logger().warn('No joint state received yet — retrying ...')
                 if self._elapsed() > 3.0:
@@ -439,10 +466,15 @@ class GraspNode(Node):
             if self._elapsed() < 0.1:
                 result_msg = Bool()
                 result_msg.data = True
-                self._result_pub.publish(result_msg)
+                if self.action == 'pick':
+                    self._pick_result_pub.publish(result_msg)
+                else:
+                    self._place_result_pub.publish(result_msg)
                 self.get_logger().info('=' * 50)
-                self.get_logger().info('Grasp complete! Published grasp_completed=True')
+                self.get_logger().info(f'{self.action.capitalize()} complete! Published {self.action}_result=True')
                 self.get_logger().info('=' * 50)
+                if self.action == 'place':
+                    self.arm_name = None
                 self._transition(State.IDLE)
 
         # ── FAILED ───────────────────────────────────────────────────────
@@ -451,8 +483,11 @@ class GraspNode(Node):
                 self._send_gripper(_GRIPPER_OPEN)
                 result_msg = Bool()
                 result_msg.data = False
-                self._result_pub.publish(result_msg)
-                self.get_logger().error('Grasp FAILED. Published grasp_completed=False')
+                if self.action == 'pick':
+                    self._pick_result_pub.publish(result_msg)
+                else:
+                    self._place_result_pub.publish(result_msg)
+                self.get_logger().error(f'{self.action.capitalize()} FAILED. Published {self.action}_result=False')
                 self._transition(State.IDLE)
 
 
