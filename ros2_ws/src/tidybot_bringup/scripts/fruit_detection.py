@@ -52,6 +52,7 @@ class FruitTargetNode(Node):
         # Publisher
         self.target_pub = self.create_publisher(PointStamped, "/fruit_target_local", 10)
         self.pick_target_pub = self.create_publisher(Pose, "/pick_target_local", 10)
+        self.place_target_pub = self.create_publisher(Pose, "/place_target_local", 10)
 
         self.bridge = CvBridge()
 
@@ -65,7 +66,8 @@ class FruitTargetNode(Node):
         self.model = YOLO("yolov8n.pt")
 
         # COCO class names we want
-        self.target_classes = {"banana", "apple", "bowl"}
+        self.target_pick_classes = {"banana", "apple"}
+        self.target_place_classes = {"bowl"}
 
         # Subscribe to camera intrinsics
         self.camera_info_sub = self.create_subscription(
@@ -129,7 +131,7 @@ class FruitTargetNode(Node):
             conf = float(b.conf.item())
 
             cls_name = names[cls_id] if isinstance(names, (list, tuple)) else names.get(cls_id, str(cls_id))
-            if cls_name not in self.target_classes:
+            if cls_name not in self.target_pick_classes and cls_name not in self.target_place_classes:
                 continue
 
             x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
@@ -137,7 +139,7 @@ class FruitTargetNode(Node):
                 best = (conf, cls_name, (x1, y1, x2, y2))
 
         if best is None:
-            self.get_logger().info("YOLO: detections found, but none were apple/banana")
+            self.get_logger().info("YOLO: detections found, but none were apple/banana/basket")
             return
 
         conf, cls_name, (x1, y1, x2, y2) = best
@@ -173,10 +175,10 @@ class FruitTargetNode(Node):
             f"XYZ=({X:.3f},{Y:.3f},{Z:.3f})"
         )
 
-        self.publish_target((X, Y, Z), orientation, rgb_msg.header)
-
-        # Optional: visualize (comment out if headless)
-        # self.debug_viz(rgb, (x1, y1, x2, y2), cls_name, conf, (cx, cy), depth_m)
+        if cls_name in self.target_pick_classes:
+            self.publish_pick_target((X, Y, Z), orientation, rgb_msg.header)
+        elif cls_name in self.target_place_classes:
+            self.publish_place_target((X, Y, Z), orientation, rgb_msg.header)
 
     # --------------------------------------------------
 

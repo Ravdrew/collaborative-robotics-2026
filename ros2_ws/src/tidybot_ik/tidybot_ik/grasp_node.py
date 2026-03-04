@@ -82,8 +82,8 @@ _FINGERS_DOWN_HORIZONTAL = (0.5, 0.5, 0.5, -0.5)  # (qw, qx, qy, qz)
 _FINGERS_DOWN_VERTICAL = (0.707107, 0.0, 0.707107, 0.0)  # (qw, qx, qy, qz)
 
 # Gripper positions (0.0 = open, 1.0 = closed — matches test_arms_sim.py)
-_GRIPPER_OPEN   = 0.0
-_GRIPPER_CLOSED = 1.0
+_GRIPPER_OPEN   = 0.1
+_GRIPPER_CLOSED = 0.9
 
 # Finger joint open position (metres) — from MuJoCo model range
 _FINGER_OPEN_POS = 0.037
@@ -157,9 +157,10 @@ class GraspNode(Node):
         # ------------------------------------------------------------------
         # Subscribers
         # ------------------------------------------------------------------
-        self.create_subscription(Pose,       '/pick_target_local',   self._on_pick_target,   10)
-        self.create_subscription(Pose,       '/EEF_pose_command',    self._on_eef_pose,       10)
-        self.create_subscription(JointState, '/joint_states',        self._on_joint_states,   10)
+        self.create_subscription(Pose,       '/pick_target_local',   self._on_pick_target, 10)
+        self.create_subscription(Pose,       '/place_target_local',  self._on_place_target, 10)
+        self.create_subscription(Pose,       '/EEF_pose_command',    self._on_eef_pose, 10)
+        self.create_subscription(JointState, '/joint_states',        self._on_joint_states, 10)
         self.create_subscription(Bool,       '/fsm_pick_request',    self._on_pick_start, 10)
         self.create_subscription(Bool,       '/fsm_place_request',   self._on_place_start, 10)
 
@@ -179,6 +180,7 @@ class GraspNode(Node):
         self._plan_accepted    = False  # True once the planner has accepted the grasp request
         self._finger_pos       = None   # latest finger position (metres)
         self._pick_target_pose = None   # most recent target pose in camera_color_optical_frame
+        self._place_target_pose = None   # most recent target pose in camera_color_optical_frame
         self.action            = None   # 'pick' or 'place'
 
         # 20 Hz control loop
@@ -203,6 +205,8 @@ class GraspNode(Node):
 
     def _on_pick_target(self, msg: Pose) -> None:
         self._pick_target_pose = msg
+    def _on_place_target(self, msg: Pose) -> None:
+        self._place_target_pose = msg
     
     def _on_pick_start(self, msg: Bool) -> None:
         """Received a pick command — move to target then CLOSE gripper."""
@@ -224,14 +228,14 @@ class GraspNode(Node):
         if self._state != State.IDLE:
             self.get_logger().warn('Action already in progress — ignoring place request.')
             return
-        if self._pick_target_pose is None:
-            self.get_logger().warn('No pick target pose received yet — ignoring place request.')
+        if self._place_target_pose is None:
+            self.get_logger().warn('No place target pose received yet — ignoring place request.')
             return
         self.get_logger().info('Place request received — relaying to grasp_generation_node.')
         self.action           = 'place'
         self._waiting_for_eef = True
         self._eef_pose        = None
-        self._object_pose_pub.publish(self._pick_target_pose)
+        self._object_pose_pub.publish(self._place_target_pose)
         self._transition(State.WAIT_EEF_POSE)
 
     def _on_eef_pose(self, msg: Pose) -> None:
