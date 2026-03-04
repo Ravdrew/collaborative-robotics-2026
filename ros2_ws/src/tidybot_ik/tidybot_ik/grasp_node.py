@@ -153,6 +153,7 @@ class GraspNode(Node):
         self._left_gripper_pub  = self.create_publisher(Float64MultiArray, '/left_gripper/cmd', 10)
         self._pick_result_pub   = self.create_publisher(Bool, '/successful_pick', 10)
         self._place_result_pub  = self.create_publisher(Bool, '/placing_done', 10)
+        self._pan_tilt_pub      = self.create_publisher(Float64MultiArray, '/camera/pan_tilt_cmd', 10)
 
         # ------------------------------------------------------------------
         # Subscribers
@@ -163,6 +164,7 @@ class GraspNode(Node):
         self.create_subscription(JointState, '/joint_states',        self._on_joint_states, 10)
         self.create_subscription(Bool,       '/fsm_pick_request',    self._on_pick_start, 10)
         self.create_subscription(Bool,       '/fsm_place_request',   self._on_place_start, 10)
+        self.create_subscription(JointState, '/camera/pan_tilt_state', self._on_pan_tilt_state, 10)
 
         # ------------------------------------------------------------------
         # Service client
@@ -182,6 +184,8 @@ class GraspNode(Node):
         self._pick_target_pose = None   # most recent target pose in camera_color_optical_frame
         self._place_target_pose = None   # most recent target pose in camera_color_optical_frame
         self.action            = None   # 'pick' or 'place'
+        self.current_pan       = 0.0
+        self.current_tilt      = 0.0
 
         # 20 Hz control loop
         self.create_timer(0.05, self._control_loop)
@@ -254,6 +258,13 @@ class GraspNode(Node):
             idx = msg.name.index(finger_joint)
             self._finger_pos = msg.position[idx]
 
+    def _on_pan_tilt_state(self, msg: JointState) -> None:
+        for i, name in enumerate(msg.name):
+            if name == 'camera_pan' and i < len(msg.position):
+                self.current_pan = msg.position[i]
+            elif name == 'camera_tilt' and i < len(msg.position):
+                self.current_tilt = msg.position[i]
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -311,6 +322,16 @@ class GraspNode(Node):
         t = tf.transform.translation
         p = self._eef_pose.position
         return math.sqrt((t.x - p.x)**2 + (t.y - p.y)**2 + (t.z - p.z)**2)
+
+    def send_pan_tilt(self, pan, tilt, duration=1.0):
+        """Send pan-tilt command."""
+        msg = Float64MultiArray()
+        msg.data = [pan, tilt]
+        self.get_logger().info(f'Sending pan-tilt command: pan={pan:.3f}, tilt={tilt:.3f}')
+        for _ in range(int(duration * 20)):
+            self._pan_tilt_pub.publish(msg)
+            rclpy.spin_once(self, timeout_sec=0.05)
+        self.get_logger().info(f'Pan-tilt command sent: pan={pan:.3f}, tilt={tilt:.3f}')
 
     # ------------------------------------------------------------------
     # State machine
@@ -500,6 +521,7 @@ def main(args=None):
     node = GraspNode()
 
     try:
+        node.send_pan_tilt(0.0, 0.3, 1.0)
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
