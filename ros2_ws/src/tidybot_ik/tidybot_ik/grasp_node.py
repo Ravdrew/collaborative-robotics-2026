@@ -65,11 +65,13 @@ from tidybot_msgs.srv import PlanToTarget
 # Matches test_planner_sim.py
 # ---------------------------------------------------------------------------
 _FINGERS_DOWN_HORIZONTAL = (0.5, 0.5, 0.5, -0.5)  # (qw, qx, qy, qz)
-_FINGERS_DOWN_VERTICAL = (0.707107, 0.0, 0.707107, 0.0)  # (qw, qx, qy, qz)
+_FINGERS_DOWN_VERTICAL = (0, 0.707107, 0, 0.707107)   # (qw, qx, qy, qz)
 
 # Gripper positions (0.0 = open, 1.0 = closed — matches test_arms_sim.py)
 _GRIPPER_OPEN   = 0.1
 _GRIPPER_CLOSED = 0.9
+
+_CAMERA_PAN = 0.6
 
 # Finger joint open position (metres) — from MuJoCo model range
 _FINGER_OPEN_POS = 0.037
@@ -100,7 +102,7 @@ class GraspNode(Node):
         # ------------------------------------------------------------------
         self.declare_parameter('gripper_toggle_time', 5.0)
         self.declare_parameter('grasp_finger_threshold', 0.033)
-        self.declare_parameter('eef_arrival_threshold', 0.1)
+        self.declare_parameter('eef_arrival_threshold', 0.05)
         # Neutral/retract pose in base_link (safe overhead position)
         self.declare_parameter('neutral_x',  -0.15)
         self.declare_parameter('neutral_y', -0.40)
@@ -397,7 +399,8 @@ class GraspNode(Node):
             elapsed = self._elapsed()
             if elapsed < 0.1:
                 self.get_logger().info('Closing gripper ...')
-            self._send_gripper(_GRIPPER_CLOSED)
+            if elapsed > 1.0:
+                self._send_gripper(_GRIPPER_CLOSED)
             if elapsed > self.gripper_toggle_time:
                 self.get_logger().info('Gripper closed.')
                 self._transition(State.PLAN_NEUTRAL)
@@ -507,7 +510,7 @@ def main(args=None):
     node = GraspNode()
 
     try:
-        node.send_pan_tilt(0.0, 0.3, 1.0)
+        node.send_pan_tilt(0.0, _CAMERA_PAN, 1.0)
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass

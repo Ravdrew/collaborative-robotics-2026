@@ -176,9 +176,9 @@ class FruitTargetNode(Node):
         )
 
         if cls_name in self.target_pick_classes:
-            self.publish_pick_target((X, Y, Z), orientation, rgb_msg.header)
+            self.publish_target("pick", (X, Y, Z), orientation, rgb_msg.header)
         elif cls_name in self.target_place_classes:
-            self.publish_place_target((X, Y, Z), orientation, rgb_msg.header)
+            self.publish_target("place", (X, Y, Z), orientation, rgb_msg.header)
 
     # --------------------------------------------------
 
@@ -264,17 +264,7 @@ class FruitTargetNode(Node):
 
     # --------------------------------------------------
 
-    def publish_target(self, point_xyz, orientation, header):
-        msg = PointStamped()
-        msg.header = header
-        msg.header.frame_id = "camera_color_optical_frame"
-
-        msg.point.x = float(point_xyz[0])
-        msg.point.y = float(point_xyz[1])
-        msg.point.z = float(point_xyz[2])
-
-        self.target_pub.publish(msg)
-
+    def publish_target(self, action, point_xyz, orientation, header):
         # Publish Pose to /pick_target_local for grasp_node
         from geometry_msgs.msg import Pose
         pose_msg = Pose()
@@ -286,7 +276,10 @@ class FruitTargetNode(Node):
         pose_msg.orientation.x = 0.0
         pose_msg.orientation.y = 0.0
         pose_msg.orientation.z = 0.0
-        self.pick_target_pub.publish(pose_msg)
+        if action == "pick":
+            self.pick_target_pub.publish(pose_msg)
+        elif action == "place":
+            self.place_target_pub.publish(pose_msg)
 
     # --------------------------------------------------
 
