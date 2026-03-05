@@ -91,7 +91,7 @@ RUN /bin/bash -c "\
 # Standalone MuJoCo simulation launcher
 RUN echo '#!/bin/bash' > /usr/local/bin/tidybot-sim && \
     echo 'cd /opt/tidybot2/simulation/scripts' >> /usr/local/bin/tidybot-sim && \
-    echo 'uv run python test_move.py' >> /usr/local/bin/tidybot-sim && \
+    echo 'uv run python test_move_sim.py' >> /usr/local/bin/tidybot-sim && \
     chmod +x /usr/local/bin/tidybot-sim
 
 # ROS2 simulation launcher

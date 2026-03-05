@@ -37,10 +37,14 @@ install(PROGRAMS
   scripts/diagnose_dynamixel.py
   scripts/example_state_machine.py
   scripts/trajectory_tracking.py
+  scripts/our_base_state_estimator.py
+  scripts/our_depth_estimator.py
+  scripts/our_state_adapter.py
+  scripts/our_state_machine.py
   scripts/our_trajectory_tracking.py
   scripts/our_astar_navigator.py
   scripts/our_frontier_exploration.py
-  scripts/our_base_state_estimator.py
+  scripts/our_heading_controller.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

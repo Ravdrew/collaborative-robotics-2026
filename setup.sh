@@ -226,7 +226,7 @@ build_ros2_workspace() {
 run_standalone_sim() {
     print_status "Starting standalone MuJoCo simulation..."
     cd "$SCRIPT_DIR/simulation/scripts"
-    uv run python test_move.py
+    uv run python test_move_sim.py
 }
 
 run_ros2_sim() {

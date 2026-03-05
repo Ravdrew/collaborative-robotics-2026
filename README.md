@@ -65,10 +65,10 @@ The setup script handles everything: system dependencies, ROS2 Humble, Python en
 cd simulation/scripts
 
 # Bimanual arm demo with camera control
-uv run python test_move.py
+uv run python test_move_sim.py
 
 # Object manipulation demo
-uv run python pick_up_block.py
+uv run python pick_up_block_sim.py
 ```
 
 ### Option 2: Full ROS2 Simulation
@@ -139,7 +139,7 @@ ros2 run tidybot_bringup test_arms_real.py
 ```
 collaborative-robotics-2026/
 ├── simulation/                  # Standalone MuJoCo simulation
-│   ├── scripts/                 # test_move.py, pick_up_block.py
+│   ├── scripts/                 # test_move_sim.py, pick_up_block_sim.py
 │   └── assets/                  # MuJoCo models and meshes
 │
 └── ros2_ws/                     # ROS2 workspace
