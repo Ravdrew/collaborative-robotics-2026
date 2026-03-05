@@ -143,6 +143,20 @@ def launch_setup(context, *args, **kwargs):
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
+    # # this calls explore_lite as a frontier explorer that runs on startup
+    # explore_node = Node(
+    # package='explore_lite',
+    # executable='explore',
+    # name='explore',
+    # parameters=[{
+    #     'use_sim_time': use_sim_time,
+    #     # # Tunable parameters
+    #     # 'min_frontier_size': 0.5,
+    #     # 'planner_frequency': 1.0,
+    #     # 'clearing_rotation_allowed': True,
+    # }],
+    # )
+
     # # AprilTag parameters, from apriltag_ros
     # apriltag_node = Node(
     # package='apriltag_ros',
@@ -185,6 +199,7 @@ def launch_setup(context, *args, **kwargs):
         localization_node,
         nav2_bringup,
         rviz_node,
+        # explore_node,
         # apriltag_node,
         # tag_localization_node,
         # ekf_node,
