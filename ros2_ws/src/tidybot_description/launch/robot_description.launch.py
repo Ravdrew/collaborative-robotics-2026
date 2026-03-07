@@ -12,7 +12,7 @@ def generate_launch_description():
     pkg_share = FindPackageShare('tidybot_description')
 
     # Path to xacro file
-    urdf_path = PathJoinSubstitution([pkg_share, 'urdf', 'tidybot_wx250s_lidar.urdf.xacro'])
+    urdf_path = PathJoinSubstitution([pkg_share, 'urdf', 'tidybot_wx250s.urdf.xacro'])
 
     # Declare arguments
     use_sim_time = LaunchConfiguration('use_sim_time')
