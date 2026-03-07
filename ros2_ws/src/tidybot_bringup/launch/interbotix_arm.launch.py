@@ -55,6 +55,8 @@ def launch_setup(context, *args, **kwargs):
             'load_configs': load_configs,
         }],
         output='screen',
+        respawn=True,
+        respawn_delay=2.0,
     )
     nodes.append(right_xs_sdk)
 
@@ -74,6 +76,8 @@ def launch_setup(context, *args, **kwargs):
                 'load_configs': load_configs,
             }],
             output='screen',
+            respawn=True,
+            respawn_delay=2.0,
         )
         nodes.append(left_xs_sdk)
 

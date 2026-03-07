@@ -183,6 +183,8 @@ def launch_setup(context, *args, **kwargs):
                 'load_configs': load_configs,
             }],
             output='screen',
+            respawn=True,
+            respawn_delay=2.0,
         ))
 
         # Left arm on U2D2 #2 (/dev/ttyUSB_LEFT)
@@ -201,6 +203,8 @@ def launch_setup(context, *args, **kwargs):
                     'load_configs': load_configs,
                 }],
                 output='screen',
+                respawn=True,
+                respawn_delay=2.0,
             ))
 
         # Arm wrapper - translates sim-compatible /right_arm/joint_cmd and /left_arm/joint_cmd
