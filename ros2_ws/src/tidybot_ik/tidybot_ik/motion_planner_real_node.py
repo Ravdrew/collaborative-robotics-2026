@@ -717,7 +717,7 @@ class MotionPlannerRealNode(Node):
         condition_number = self.compute_jacobian_condition(arm_name, solution)
         response.condition_number = condition_number
 
-        max_cond = request.max_condition_number if request.max_condition_number > 0 else 100.0
+        max_cond = request.max_condition_number if request.max_condition_number > 0 else 500.0
         if condition_number > max_cond:
             response.success = False
             response.message = f"Near singularity: condition number={condition_number:.1f} > {max_cond}"
