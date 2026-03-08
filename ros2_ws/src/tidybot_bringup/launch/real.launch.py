@@ -427,7 +427,7 @@ def generate_launch_description():
             description='Serial number for top RealSense camera'
         ),
         DeclareLaunchArgument(
-            'use_top_camera', default_value='true',
+            'use_top_camera', default_value='false',
             description='Launch the top RealSense camera driver'
         ),
         DeclareLaunchArgument(
