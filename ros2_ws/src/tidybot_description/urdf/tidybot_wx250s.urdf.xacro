@@ -162,8 +162,8 @@
 
   <link name="top_camera_link">
     <visual>
-      <!-- Place top_camera_link at the center of the camera back plate. -->
-      <origin xyz="0.02078 0.0175 0" rpy="0 0 0"/>
+      <!-- Keep top_camera_link at the camera mesh center (same convention as camera_link). -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="${mesh_path}/locobot_pantilt/locobot_camera.stl" scale="0.001 0.001 0.001"/>
       </geometry>
@@ -178,7 +178,8 @@
   <joint name="top_camera_mount_to_camera" type="fixed">
     <parent link="top_camera_mount"/>
     <child link="top_camera_link"/>
-    <origin xyz="0.0097 0 0.013155 " rpy="0 0.3491 0"/>
+    <!-- Adjusted so camera mesh pose remains consistent after moving link origin to mesh center. -->
+    <origin xyz="0.029227 0.0175 0.006047" rpy="0 0.3491 0"/>
   </joint>
 
   <!-- ==================== PAN-TILT CAMERA SYSTEM ==================== -->
