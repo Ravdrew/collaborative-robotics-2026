@@ -247,6 +247,7 @@ def launch_setup(context, *args, **kwargs):
                 'base_frame_id': 'link',
                 'enable_color': True,
                 'enable_depth': True,
+                'align_depth.enable': True,
                 'enable_infra1': False,
                 'enable_infra2': False,
                 'publish_tf': True,
@@ -256,6 +257,7 @@ def launch_setup(context, *args, **kwargs):
             remappings=[
                 ('/camera/realsense/color/image_raw', '/camera/color/image_raw'),
                 ('/camera/realsense/depth/image_rect_raw', '/camera/depth/image_raw'),
+                ('/camera/realsense/aligned_depth_to_color/image_raw', '/camera/aligned_depth_to_color/image_raw'),
                 ('/camera/realsense/color/camera_info', '/camera/color/camera_info'),
                 ('/camera/realsense/depth/camera_info', '/camera/depth/camera_info'),
             ]
@@ -275,6 +277,7 @@ def launch_setup(context, *args, **kwargs):
                 'base_frame_id': 'link',
                 'enable_color': True,
                 'enable_depth': True,
+                'align_depth.enable': True,
                 'enable_infra1': False,
                 'enable_infra2': False,
                 'publish_tf': True,
@@ -285,6 +288,7 @@ def launch_setup(context, *args, **kwargs):
                 # Main image streams
                 ('/camera/top_realsense/color/image_raw', '/top_camera/color/image_raw'),
                 ('/camera/top_realsense/depth/image_rect_raw', '/top_camera/depth/image_raw'),
+                ('/camera/top_realsense/aligned_depth_to_color/image_raw', '/top_camera/aligned_depth_to_color/image_raw'),
                 ('/camera/top_realsense/color/camera_info', '/top_camera/color/camera_info'),
                 ('/camera/top_realsense/depth/camera_info', '/top_camera/depth/camera_info'),
                 # Metadata / IMU / extrinsics
