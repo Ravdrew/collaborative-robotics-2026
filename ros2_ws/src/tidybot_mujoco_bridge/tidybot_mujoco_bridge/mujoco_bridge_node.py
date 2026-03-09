@@ -164,11 +164,11 @@ class MuJoCoBridgeNode(Node):
         # Create MuJoCo renderer for camera images
         self.renderer = mujoco.Renderer(self.model, height=480, width=640)
 
-        # State variables
+        # State variables — read initial base pose from keyframe/qpos
         self.sim_step_count = 0
-        self.base_x = 0.0
-        self.base_y = 0.0
-        self.base_th = np.pi / 2  # Robot model faces -Y, rotate 90° to face +X
+        self.base_x = float(self.data.qpos[self.model.jnt_qposadr[self.joint_ids['joint_x']]]) if 'joint_x' in self.joint_ids else 0.0
+        self.base_y = float(self.data.qpos[self.model.jnt_qposadr[self.joint_ids['joint_y']]]) if 'joint_y' in self.joint_ids else 0.0
+        self.base_th = float(self.data.qpos[self.model.jnt_qposadr[self.joint_ids['joint_th']]]) if 'joint_th' in self.joint_ids else np.pi / 2
         self.cmd_vel = Twist()
         self.current_vel = Twist()  # Smoothed velocity
         self.last_sim_time = None
@@ -215,6 +215,9 @@ class MuJoCoBridgeNode(Node):
         self.rgb_pub = self.create_publisher(Image, '/camera/color/image_raw', qos)
         self.depth_pub = self.create_publisher(Image, '/camera/depth/image_raw', qos)
         self.camera_info_pub = self.create_publisher(CameraInfo, '/camera/color/camera_info', qos)
+        self.depth_camera_info_pub = self.create_publisher(CameraInfo, '/camera/depth/camera_info', qos)
+        self.depth_nav_pub = self.create_publisher(Image, '/camera/depth/image_nav', qos)
+        self.depth_nav_info_pub = self.create_publisher(CameraInfo, '/camera/depth/camera_info_nav', qos)
         self.goal_reached_pub = self.create_publisher(Bool, '/base/goal_reached', 10)
 
         # TF broadcaster
@@ -573,15 +576,17 @@ class MuJoCoBridgeNode(Node):
             odom = Odometry()
             odom.header.stamp = now
             odom.header.frame_id = 'odom'
-            odom.child_frame_id = 'base_link'
+            odom.child_frame_id = 'base_footprint'
 
             odom.pose.pose.position.x = actual_base_x
             odom.pose.pose.position.y = actual_base_y
             odom.pose.pose.position.z = 0.0
 
             # Convert yaw to quaternion
-            cy = np.cos(actual_base_th * 0.5)
-            sy = np.sin(actual_base_th * 0.5)
+            # Offset by -π/2: MuJoCo model faces -Y at θ=0, ROS expects +X at θ=0
+            ros_yaw = actual_base_th - np.pi / 2
+            cy = np.cos(ros_yaw * 0.5)
+            sy = np.sin(ros_yaw * 0.5)
             odom.pose.pose.orientation.x = 0.0
             odom.pose.pose.orientation.y = 0.0
             odom.pose.pose.orientation.z = sy
@@ -591,11 +596,11 @@ class MuJoCoBridgeNode(Node):
 
             self.odom_pub.publish(odom)
 
-            # Publish TF: odom -> base_link (using actual MuJoCo position)
+            # Publish TF: odom -> base_footprint (using actual MuJoCo position)
             t = TransformStamped()
             t.header.stamp = now
             t.header.frame_id = 'odom'
-            t.child_frame_id = 'base_link'
+            t.child_frame_id = 'base_footprint'
             t.transform.translation.x = actual_base_x
             t.transform.translation.y = actual_base_y
             t.transform.translation.z = 0.0
@@ -624,10 +629,13 @@ class MuJoCoBridgeNode(Node):
             # Render depth image
             self.renderer.update_scene(self.data, camera='d435_depth')
             self.renderer.enable_depth_rendering()
-            depth_image = self.renderer.render()
+            depth_image_raw = self.renderer.render()
             self.renderer.disable_depth_rendering()
-            # Flip vertically and horizontally to match ROS camera convention
-            depth_image = np.fliplr(np.flipud(depth_image)).copy()
+            # For navigation: only flip horizontally (corrects left-right mirror from MuJoCo camera quaternion)
+            # but NOT vertically (keeps scan in horizontal plane for camera_link frame)
+            depth_image_nav = np.fliplr(depth_image_raw).copy()
+            # Flip vertically and horizontally to match ROS camera convention for display
+            depth_image = np.fliplr(np.flipud(depth_image_raw)).copy()
 
         # Publish RGB image
         try:
@@ -659,10 +667,52 @@ class MuJoCoBridgeNode(Node):
         fy = 480 / (2 * np.tan(np.radians(42) / 2))
         fx = fy  # Square pixels
         camera_info.k = [fx, 0.0, 320.0, 0.0, fy, 240.0, 0.0, 0.0, 1.0]
+        camera_info.distortion_model = 'plumb_bob'
         camera_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
         camera_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         camera_info.p = [fx, 0.0, 320.0, 0.0, 0.0, fy, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
         self.camera_info_pub.publish(camera_info)
+
+        # Publish depth camera info (needed by depthimage_to_laserscan)
+        depth_camera_info = CameraInfo()
+        depth_camera_info.header.stamp = now
+        depth_camera_info.header.frame_id = 'camera_depth_optical_frame'
+        depth_camera_info.width = 640
+        depth_camera_info.height = 480
+        # D435 depth camera FOV is ~57 degrees vertical
+        depth_fy = 480 / (2 * np.tan(np.radians(57) / 2))
+        depth_fx = depth_fy  # Square pixels
+        depth_camera_info.k = [depth_fx, 0.0, 320.0, 0.0, depth_fy, 240.0, 0.0, 0.0, 1.0]
+        depth_camera_info.distortion_model = 'plumb_bob'
+        depth_camera_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+        depth_camera_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        depth_camera_info.p = [depth_fx, 0.0, 320.0, 0.0, 0.0, depth_fy, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        self.depth_camera_info_pub.publish(depth_camera_info)
+
+        # Publish un-flipped depth image for navigation (correct geometry in camera_link frame)
+        try:
+            depth_nav_mm = (depth_image_nav * 1000).astype(np.uint16)
+            depth_nav_msg = self.cv_bridge.cv2_to_imgmsg(depth_nav_mm, encoding='16UC1')
+            depth_nav_msg.header.stamp = now
+            depth_nav_msg.header.frame_id = 'camera_link'
+            self.depth_nav_pub.publish(depth_nav_msg)
+        except Exception as e:
+            self.get_logger().warn(f'Failed to publish nav depth image: {e}')
+
+        # Publish nav depth camera info (in camera_link frame)
+        nav_info = CameraInfo()
+        nav_info.header.stamp = now
+        nav_info.header.frame_id = 'camera_link'
+        nav_info.width = 640
+        nav_info.height = 480
+        depth_fy_nav = 480 / (2 * np.tan(np.radians(57) / 2))
+        depth_fx_nav = depth_fy_nav
+        nav_info.k = [depth_fx_nav, 0.0, 320.0, 0.0, depth_fy_nav, 240.0, 0.0, 0.0, 1.0]
+        nav_info.distortion_model = 'plumb_bob'
+        nav_info.d = [0.0, 0.0, 0.0, 0.0, 0.0]
+        nav_info.r = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        nav_info.p = [depth_fx_nav, 0.0, 320.0, 0.0, 0.0, depth_fy_nav, 240.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        self.depth_nav_info_pub.publish(nav_info)
 
     def destroy_node(self):
         """Clean up resources."""

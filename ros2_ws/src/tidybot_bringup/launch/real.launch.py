@@ -5,8 +5,9 @@ Launches:
 - Phoenix 6 mobile base driver
 - Interbotix xs_sdk arm drivers (dual U2D2 setup)
 - Pan-tilt RealSense camera driver
-- Optional top RealSense camera driver
-- Optional RPLIDAR node
+- Top sensor stack selected by sensor_mode:=lidar|top_camera
+  - lidar: launches RPLIDAR node
+  - top_camera: launches second RealSense node
 - Robot state publisher (URDF + TF)
 - Image compression (optional, for remote clients)
 - Arm/gripper wrappers for sim-compatible topics (optional, on by default)
@@ -22,6 +23,7 @@ Hardware Setup (Dual U2D2):
 Usage:
     ros2 launch tidybot_bringup real.launch.py
     ros2 launch tidybot_bringup real.launch.py use_rviz:=false
+    ros2 launch tidybot_bringup real.launch.py sensor_mode:=top_camera
     ros2 launch tidybot_bringup real.launch.py use_top_camera:=true
     ros2 launch tidybot_bringup real.launch.py use_lidar:=true use_top_camera:=true
     ros2 launch tidybot_bringup real.launch.py use_base:=false  # Disable base
@@ -74,6 +76,7 @@ def launch_setup(context, *args, **kwargs):
     use_camera = LaunchConfiguration('use_camera').perform(context) == 'true'
     use_top_camera = LaunchConfiguration('use_top_camera').perform(context) == 'true'
     use_lidar = LaunchConfiguration('use_lidar').perform(context) == 'true'
+    sensor_mode = LaunchConfiguration('sensor_mode').perform(context)
     use_compression = LaunchConfiguration('use_compression').perform(context) == 'true'
     use_rviz = LaunchConfiguration('use_rviz').perform(context) == 'true'
     use_planner = LaunchConfiguration('use_planner').perform(context) == 'true'
@@ -82,6 +85,15 @@ def launch_setup(context, *args, **kwargs):
     load_configs = LaunchConfiguration('load_configs').perform(context) == 'true'
     primary_camera_serial = LaunchConfiguration('primary_camera_serial').perform(context)
     top_camera_serial = LaunchConfiguration('top_camera_serial').perform(context)
+
+    if sensor_mode not in ('lidar', 'top_camera'):
+        raise RuntimeError(
+            f"Invalid sensor_mode '{sensor_mode}'. Expected 'lidar' or 'top_camera'."
+        )
+
+    # sensor_mode is authoritative for selecting the top sensor stack.
+    effective_use_lidar = (sensor_mode == 'lidar') and use_lidar
+    effective_use_top_camera = (sensor_mode == 'top_camera') and use_top_camera
     use_grasp_nodes = LaunchConfiguration('use_grasp_nodes').perform(context) == 'true'
     use_fruit_detection = LaunchConfiguration('use_fruit_detection').perform(context) == 'true'
 
@@ -109,8 +121,9 @@ def launch_setup(context, *args, **kwargs):
 
     nodes = []
 
-    # URDF from xacro
-    urdf_path = PathJoinSubstitution([pkg_description, 'urdf', 'tidybot_wx250s.urdf.xacro'])
+    # URDF from xacro (selected by sensor_mode)
+    urdf_file = 'tidybot_wx250s_lidar.urdf.xacro' if sensor_mode == 'lidar' else 'tidybot_wx250s.urdf.xacro'
+    urdf_path = PathJoinSubstitution([pkg_description, 'urdf', urdf_file])
     robot_description = ParameterValue(
         Command(['xacro ', urdf_path, ' include_camera_optical_frames:=false']),
         value_type=str
@@ -383,6 +396,71 @@ def launch_setup(context, *args, **kwargs):
             ]
         ))
 
+    # Additional top RealSense camera (replaces lidar stack when sensor_mode:=top_camera)
+    if effective_use_top_camera:
+        nodes.append(Node(
+            package='realsense2_camera',
+            executable='realsense2_camera_node',
+            name='top_realsense',
+            output='screen',
+            parameters=[{
+                'camera_name': 'top_camera',
+                'camera_namespace': '',
+                'serial_no': top_camera_serial,
+                'base_frame_id': 'link',
+                'enable_color': True,
+                'enable_depth': True,
+                'enable_infra1': False,
+                'enable_infra2': False,
+                'publish_tf': True,
+                'rgb_camera.color_profile': '640x480x15',
+                'depth_module.depth_profile': '640x480x15',
+            }],
+            remappings=[
+                # Main image streams
+                ('/camera/top_realsense/color/image_raw', '/top_camera/color/image_raw'),
+                ('/camera/top_realsense/depth/image_rect_raw', '/top_camera/depth/image_raw'),
+                ('/camera/top_realsense/color/camera_info', '/top_camera/color/camera_info'),
+                ('/camera/top_realsense/depth/camera_info', '/top_camera/depth/camera_info'),
+                # Metadata / IMU / extrinsics
+                ('/camera/top_realsense/accel/imu_info', '/top_camera/accel/imu_info'),
+                ('/camera/top_realsense/accel/metadata', '/top_camera/accel/metadata'),
+                ('/camera/top_realsense/accel/sample', '/top_camera/accel/sample'),
+                ('/camera/top_realsense/color/metadata', '/top_camera/color/metadata'),
+                ('/camera/top_realsense/depth/metadata', '/top_camera/depth/metadata'),
+                ('/camera/top_realsense/extrinsics/depth_to_accel', '/top_camera/extrinsics/depth_to_accel'),
+                ('/camera/top_realsense/extrinsics/depth_to_color', '/top_camera/extrinsics/depth_to_color'),
+                ('/camera/top_realsense/extrinsics/depth_to_depth', '/top_camera/extrinsics/depth_to_depth'),
+                ('/camera/top_realsense/extrinsics/depth_to_gyro', '/top_camera/extrinsics/depth_to_gyro'),
+                ('/camera/top_realsense/gyro/imu_info', '/top_camera/gyro/imu_info'),
+                ('/camera/top_realsense/gyro/metadata', '/top_camera/gyro/metadata'),
+                ('/camera/top_realsense/gyro/sample', '/top_camera/gyro/sample')
+            ]
+        ))
+
+    # RPLIDAR A2M8 (LoCoBot-style config; publishes LaserScan on /scan)
+    if effective_use_lidar:
+        lidar_serial_port = LaunchConfiguration('lidar_serial_port').perform(context)
+        lidar_serial_baudrate = int(LaunchConfiguration('lidar_serial_baudrate').perform(context))
+        lidar_frame_id = LaunchConfiguration('lidar_frame_id').perform(context)
+
+        nodes.append(Node(
+            package='rplidar_ros',
+            executable='rplidar_composition',
+            name='rplidar_composition',
+            output='screen',
+            parameters=[{
+                'serial_port': lidar_serial_port,
+                'serial_baudrate': lidar_serial_baudrate,
+                'frame_id': lidar_frame_id,
+                'inverted': False,
+                'angle_compensate': True,
+            }],
+            remappings=[
+                ('scan', '/scan'),
+            ]
+        ))
+
     # Image compression for remote clients
     if use_compression:
         nodes.append(Node(
@@ -497,20 +575,24 @@ def generate_launch_description():
             description='Launch pan-tilt RealSense camera driver'
         ),
         DeclareLaunchArgument(
+            'sensor_mode', default_value='lidar',
+            description="Top sensor mode: 'lidar' or 'top_camera' (sensor_mode wins over use_lidar)"
+        ),
+        DeclareLaunchArgument(
             'primary_camera_serial', default_value='_023422071689',
             description='Serial number for primary pan-tilt RealSense camera'
         ),
         DeclareLaunchArgument(
             'top_camera_serial', default_value='_332522075252',
-            description='Serial number for top RealSense camera'
+            description='Serial number for top RealSense camera (used when sensor_mode:=top_camera)'
         ),
         DeclareLaunchArgument(
-            'use_top_camera', default_value='false',
-            description='Launch the top RealSense camera driver'
+            'use_top_camera', default_value='true',
+            description='Top camera enable flag for top_camera mode only; ignored when sensor_mode:=lidar'
         ),
         DeclareLaunchArgument(
             'use_lidar', default_value='false',
-            description='Launch the RPLIDAR driver'
+            description='Legacy lidar enable flag for lidar mode only; ignored when sensor_mode:=top_camera'
         ),
         DeclareLaunchArgument(
             'lidar_serial_port', default_value='/dev/rplidar',

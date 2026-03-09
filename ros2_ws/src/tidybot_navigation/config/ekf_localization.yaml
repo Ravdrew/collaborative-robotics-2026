@@ -1,0 +1,64 @@
+ekf_filter_node:
+ros__parameters:
+
+```
+frequency: 30.0
+sensor_timeout: 0.2
+two_d_mode: true
+publish_tf: true
+
+map_frame: map
+odom_frame: odom
+base_link_frame: base_link
+world_frame: map
+
+# -----------------------------
+# WHEEL / SLAM ODOM (continuous)
+# -----------------------------
+odom0: /odom
+odom0_config: [true, true, false,
+               false, false, true,
+               true, true, false,
+               false, false, true,
+               false, false, false]
+
+odom0_differential: false
+odom0_relative: false
+
+# -----------------------------
+# SLAM TOOLBOX POSE
+# -----------------------------
+pose0: /slam_toolbox/pose
+pose0_config: [true, true, false,
+               false, false, true,
+               false, false, false,
+               false, false, false,
+               false, false, false]
+
+pose0_differential: false
+pose0_relative: false
+
+# -----------------------------
+# APRILTAG GLOBAL POSE
+# -----------------------------
+pose1: /tag_global_pose
+pose1_config: [true, true, false,
+               false, false, true,
+               false, false, false,
+               false, false, false,
+               false, false, false]
+
+pose1_differential: false
+pose1_relative: false
+
+# Trust tags strongly (absolute anchor)
+pose1_queue_size: 5
+
+# Process noise
+process_noise_covariance: [0.05, 0, 0, 0, 0, 0,
+                           0, 0.05, 0, 0, 0, 0,
+                           0, 0, 1e6, 0, 0, 0,
+                           0, 0, 0, 1e6, 0, 0,
+                           0, 0, 0, 0, 1e6, 0,
+                           0, 0, 0, 0, 0, 0.03]
+```

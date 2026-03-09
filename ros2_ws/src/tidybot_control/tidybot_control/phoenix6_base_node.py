@@ -297,7 +297,7 @@ class Phoenix6BaseNode(Node):
         odom = Odometry()
         odom.header.stamp = now
         odom.header.frame_id = 'odom'
-        odom.child_frame_id = 'base_link'
+        odom.child_frame_id = 'base_footprint'
 
         odom.pose.pose.position.x = x
         odom.pose.pose.position.y = y
@@ -317,11 +317,11 @@ class Phoenix6BaseNode(Node):
 
         self.odom_pub.publish(odom)
 
-        # Publish TF: odom -> base_link
+        # Publish TF: odom -> base_footprint
         t = TransformStamped()
         t.header.stamp = now
         t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_link'
+        t.child_frame_id = 'base_footprint'
         t.transform.translation.x = x
         t.transform.translation.y = y
         t.transform.translation.z = 0.0

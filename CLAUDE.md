@@ -2,10 +2,11 @@
 
 ## Rules for Claude
 
-1. **Always commit and push changes** - After making code changes, Claude should add, commit, and push to the repository (unless the user specifies otherwise).
+1. **Never commit or push without explicit permission** - Only commit and push when the user specifically asks.
 2. **Use descriptive commit messages** - Summarize what was changed and why.
 3. **Test before committing** - Ensure changes work before pushing.
 4. **Update documentation** - Keep README.md and CLAUDE.md up to date with any significant changes.
+5. **Never create pull requests without explicit permission** - Do not open PRs unless the user specifically asks for one.
 
 ## Project Overview
 
