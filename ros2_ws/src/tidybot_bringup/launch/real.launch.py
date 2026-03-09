@@ -537,6 +537,7 @@ def launch_setup(context, *args, **kwargs):
             executable='microphone_node',
             name='microphone',
             output='screen',
+            additional_env=hw_node_env,
             parameters=[{
                 'sample_rate': 16000,
                 'channels': 1,
