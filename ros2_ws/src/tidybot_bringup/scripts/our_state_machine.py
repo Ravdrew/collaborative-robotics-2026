@@ -429,6 +429,7 @@ class StateMachineNode(Node):
         out = String()
         out.data = self.state.value
         self.state_pub.publish(out)
+        self.get_logger().info(f"Published state: '{self.state.value}'")
 
     # Emit periodic heartbeat for runtime debugging.
     def _heartbeat_log(self):
