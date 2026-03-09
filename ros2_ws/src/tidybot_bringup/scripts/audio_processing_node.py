@@ -171,6 +171,7 @@ class AudioProcessingNode(Node):
                 sample_rate = audio_resp.sample_rate
 
             transcript = self._transcribe_google(audio_data, sample_rate)
+            self.get_logger().info(f"Transcript: '{transcript}'")
             parsed = self._parse_with_gemini(transcript)
             self._publish_targets(parsed.pick_target, parsed.place_target)
 
@@ -202,7 +203,7 @@ class AudioProcessingNode(Node):
             raise RuntimeError(f"Start recording failed: {start_resp.message}")
 
         self._set_is_recording(True)
-        self.get_logger().info(f"Recording for {seconds:.1f}s...")
+        self.get_logger().info(f"Started recording for {seconds:.1f}s...")
         time.sleep(seconds)
 
         # Stop recording
@@ -213,7 +214,7 @@ class AudioProcessingNode(Node):
             raise RuntimeError(f"Stop recording failed: {stop_resp.message}")
 
         self.get_logger().info(
-            f"Recorded: {stop_resp.duration:.2f}s @ {stop_resp.sample_rate} Hz, "
+            f"Finished recording: {stop_resp.duration:.2f}s @ {stop_resp.sample_rate} Hz, "
             f"samples={len(stop_resp.audio_data)}"
         )
         return stop_resp
