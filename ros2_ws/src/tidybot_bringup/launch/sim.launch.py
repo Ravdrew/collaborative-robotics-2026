@@ -5,6 +5,9 @@ Launches:
 - MuJoCo bridge (physics simulation)
 - Robot state publisher (URDF + TF)
 - Arm controllers (left + right)
+- Grasp generation node (camera pose -> EEF pose, optional)
+- Grasp execution node (full grasp sequence state machine, optional)
+- Fruit detection node (YOLO apple/banana detection, optional)
 - RViz (optional)
 
 Usage:
@@ -12,6 +15,8 @@ Usage:
     ros2 launch tidybot_bringup sim.launch.py use_rviz:=false
     ros2 launch tidybot_bringup sim.launch.py show_mujoco_viewer:=false
     ros2 launch tidybot_bringup sim.launch.py scene:=scene_pickup.xml
+    ros2 launch tidybot_bringup sim.launch.py use_grasp_nodes:=false
+    ros2 launch tidybot_bringup sim.launch.py use_fruit_detection:=false
 """
 
 import os
@@ -32,6 +37,8 @@ def launch_setup(context, *args, **kwargs):
     show_mujoco_viewer = LaunchConfiguration('show_mujoco_viewer')
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_motion_planner = LaunchConfiguration('use_motion_planner')
+    use_grasp_nodes = LaunchConfiguration('use_grasp_nodes')
+    use_fruit_detection = LaunchConfiguration('use_fruit_detection')
 
     # Package paths
     pkg_bringup = FindPackageShare('tidybot_bringup')
@@ -75,7 +82,7 @@ def launch_setup(context, *args, **kwargs):
             'model_path': model_path,
             'sim_rate': 500.0,
             'publish_rate': 100.0,
-            'camera_rate': 30.0,
+            'camera_rate': 0.01,
             'show_viewer': show_mujoco_viewer,
         }]
     )
@@ -116,6 +123,33 @@ def launch_setup(context, *args, **kwargs):
         }]
     )
 
+    # Grasp generation node (camera pose -> EEF pose in base_link)
+    grasp_generation = Node(
+        package='tidybot_ik',
+        executable='grasp_generation_node',
+        name='grasp_generation',
+        output='screen',
+        condition=IfCondition(use_grasp_nodes),
+    )
+
+    # Grasp execution node (full pick sequence state machine)
+    grasp_node = Node(
+        package='tidybot_ik',
+        executable='grasp_node',
+        name='grasp_node',
+        output='screen',
+        condition=IfCondition(use_grasp_nodes),
+    )
+
+    # Fruit detection node (YOLO apple/banana detection -> /pick_target_local)
+    fruit_detection = Node(
+        package='tidybot_bringup',
+        executable='fruit_detection.py',
+        name='fruit_detection',
+        output='screen',
+        condition=IfCondition(use_fruit_detection),
+    )
+
     # RViz
     rviz_config = PathJoinSubstitution([pkg_bringup, 'rviz', 'tidybot.rviz'])
     rviz = Node(
@@ -133,6 +167,9 @@ def launch_setup(context, *args, **kwargs):
         right_arm_controller,
         left_arm_controller,
         motion_planner,
+        grasp_generation,
+        grasp_node,
+        fruit_detection,
         rviz,
     ]
 
@@ -164,6 +201,16 @@ def generate_launch_description():
         description='Launch motion planner for IK and trajectory planning'
     )
 
+    declare_use_grasp_nodes = DeclareLaunchArgument(
+        'use_grasp_nodes', default_value='true',
+        description='Launch grasp_generation_node and grasp_node'
+    )
+
+    declare_use_fruit_detection = DeclareLaunchArgument(
+        'use_fruit_detection', default_value='true',
+        description='Launch YOLO fruit detection node (publishes to /pick_target_local)'
+    )
+
     return LaunchDescription([
         # Arguments
         declare_scene,
@@ -171,6 +218,8 @@ def generate_launch_description():
         declare_show_viewer,
         declare_use_sim_time,
         declare_use_planner,
+        declare_use_grasp_nodes,
+        declare_use_fruit_detection,
         # Nodes via OpaqueFunction (resolved after arguments)
         OpaqueFunction(function=launch_setup),
     ])

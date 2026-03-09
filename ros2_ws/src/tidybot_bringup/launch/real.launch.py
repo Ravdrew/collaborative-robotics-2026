@@ -11,6 +11,9 @@ Launches:
 - Robot state publisher (URDF + TF)
 - Image compression (optional, for remote clients)
 - Arm/gripper wrappers for sim-compatible topics (optional, on by default)
+- Grasp generation node (camera pose -> EEF pose, optional)
+- Grasp execution node (full grasp sequence state machine, optional)
+- Fruit detection node (YOLO apple/banana detection, optional)
 - RViz (optional)
 
 Hardware Setup (Dual U2D2):
@@ -21,9 +24,13 @@ Usage:
     ros2 launch tidybot_bringup real.launch.py
     ros2 launch tidybot_bringup real.launch.py use_rviz:=false
     ros2 launch tidybot_bringup real.launch.py sensor_mode:=top_camera
+    ros2 launch tidybot_bringup real.launch.py use_top_camera:=true
+    ros2 launch tidybot_bringup real.launch.py use_lidar:=true use_top_camera:=true
     ros2 launch tidybot_bringup real.launch.py use_base:=false  # Disable base
     ros2 launch tidybot_bringup real.launch.py use_left_arm:=false  # Right arm only
     ros2 launch tidybot_bringup real.launch.py use_sim_topics:=false  # Disable sim-compatible topics
+    ros2 launch tidybot_bringup real.launch.py use_grasp_nodes:=false  # Disable grasp nodes
+    ros2 launch tidybot_bringup real.launch.py use_fruit_detection:=false  # Disable fruit detection
 
 Sim-to-Real Topic Compatibility (use_sim_topics:=true, default):
     When enabled, the following simulation-compatible topics are available:
@@ -87,6 +94,8 @@ def launch_setup(context, *args, **kwargs):
     # sensor_mode is authoritative for selecting the top sensor stack.
     effective_use_lidar = (sensor_mode == 'lidar') and use_lidar
     effective_use_top_camera = (sensor_mode == 'top_camera') and use_top_camera
+    use_grasp_nodes = LaunchConfiguration('use_grasp_nodes').perform(context) == 'true'
+    use_fruit_detection = LaunchConfiguration('use_fruit_detection').perform(context) == 'true'
 
     # Get project root for uv packages
     tidybot2_path = os.environ.get('TIDYBOT2_PATH', '/home/locobot/tidybot2')
@@ -199,6 +208,8 @@ def launch_setup(context, *args, **kwargs):
                 'load_configs': load_configs,
             }],
             output='screen',
+            respawn=True,
+            respawn_delay=2.0,
         ))
 
         # Left arm on U2D2 #2 (/dev/ttyUSB1)
@@ -217,6 +228,8 @@ def launch_setup(context, *args, **kwargs):
                     'load_configs': load_configs,
                 }],
                 output='screen',
+                respawn=True,
+                respawn_delay=2.0,
             ))
 
         # Sim-compatible topic wrappers (when use_sim_topics:=true)
@@ -254,6 +267,8 @@ def launch_setup(context, *args, **kwargs):
                 'base_frame_id': 'link',
                 'enable_color': True,
                 'enable_depth': True,
+                'align_depth.enable': True,
+                'align_depth.enable': True,
                 'enable_infra1': False,
                 'enable_infra2': False,
                 'publish_tf': True,
@@ -263,8 +278,121 @@ def launch_setup(context, *args, **kwargs):
             remappings=[
                 ('/camera/realsense/color/image_raw', '/camera/color/image_raw'),
                 ('/camera/realsense/depth/image_rect_raw', '/camera/depth/image_raw'),
+                ('/camera/realsense/aligned_depth_to_color/image_raw', '/camera/aligned_depth_to_color/image_raw'),
                 ('/camera/realsense/color/camera_info', '/camera/color/camera_info'),
                 ('/camera/realsense/depth/camera_info', '/camera/depth/camera_info'),
+
+            ]
+        ))
+
+    # Additional top RealSense camera
+    if use_top_camera:
+        nodes.append(Node(
+            package='realsense2_camera',
+            executable='realsense2_camera_node',
+            name='top_realsense',
+            output='screen',
+            parameters=[{
+                'camera_name': 'top_camera',
+                'camera_namespace': '',
+                'serial_no': top_camera_serial,
+                'base_frame_id': 'link',
+                'enable_color': True,
+                'enable_depth': True,
+                'align_depth.enable': True,
+                'enable_infra1': False,
+                'enable_infra2': False,
+                'publish_tf': True,
+                'rgb_camera.color_profile': '640x480x15',
+                'depth_module.depth_profile': '640x480x15',
+            }],
+            remappings=[
+                # Main image streams
+                ('/camera/top_realsense/color/image_raw', '/top_camera/color/image_raw'),
+                ('/camera/top_realsense/depth/image_rect_raw', '/top_camera/depth/image_raw'),
+                ('/camera/top_realsense/aligned_depth_to_color/image_raw', '/top_camera/aligned_depth_to_color/image_raw'),
+                ('/camera/top_realsense/color/camera_info', '/top_camera/color/camera_info'),
+                ('/camera/top_realsense/depth/camera_info', '/top_camera/depth/camera_info'),
+                # Metadata / IMU / extrinsics
+                ('/camera/top_realsense/accel/imu_info', '/top_camera/accel/imu_info'),
+                ('/camera/top_realsense/accel/metadata', '/top_camera/accel/metadata'),
+                ('/camera/top_realsense/accel/sample', '/top_camera/accel/sample'),
+                ('/camera/top_realsense/color/metadata', '/top_camera/color/metadata'),
+                ('/camera/top_realsense/depth/metadata', '/top_camera/depth/metadata'),
+                ('/camera/top_realsense/extrinsics/depth_to_accel', '/top_camera/extrinsics/depth_to_accel'),
+                ('/camera/top_realsense/extrinsics/depth_to_color', '/top_camera/extrinsics/depth_to_color'),
+                ('/camera/top_realsense/extrinsics/depth_to_depth', '/top_camera/extrinsics/depth_to_depth'),
+                ('/camera/top_realsense/extrinsics/depth_to_gyro', '/top_camera/extrinsics/depth_to_gyro'),
+                ('/camera/top_realsense/gyro/imu_info', '/top_camera/gyro/imu_info'),
+                ('/camera/top_realsense/gyro/metadata', '/top_camera/gyro/metadata'),
+                ('/camera/top_realsense/gyro/sample', '/top_camera/gyro/sample')
+            ]
+        ))
+
+    # Additional top RealSense camera
+    if use_top_camera:
+        nodes.append(Node(
+            package='realsense2_camera',
+            executable='realsense2_camera_node',
+            name='top_realsense',
+            output='screen',
+            parameters=[{
+                'camera_name': 'top_camera',
+                'camera_namespace': '',
+                'serial_no': top_camera_serial,
+                'base_frame_id': 'link',
+                'enable_color': True,
+                'enable_depth': True,
+                'align_depth.enable': True,
+                'enable_infra1': False,
+                'enable_infra2': False,
+                'publish_tf': True,
+                'rgb_camera.color_profile': '640x480x15',
+                'depth_module.depth_profile': '640x480x15',
+            }],
+            remappings=[
+                # Main image streams
+                ('/camera/top_realsense/color/image_raw', '/top_camera/color/image_raw'),
+                ('/camera/top_realsense/depth/image_rect_raw', '/top_camera/depth/image_raw'),
+                ('/camera/top_realsense/aligned_depth_to_color/image_raw', '/top_camera/aligned_depth_to_color/image_raw'),
+                ('/camera/top_realsense/color/camera_info', '/top_camera/color/camera_info'),
+                ('/camera/top_realsense/depth/camera_info', '/top_camera/depth/camera_info'),
+                # Metadata / IMU / extrinsics
+                ('/camera/top_realsense/accel/imu_info', '/top_camera/accel/imu_info'),
+                ('/camera/top_realsense/accel/metadata', '/top_camera/accel/metadata'),
+                ('/camera/top_realsense/accel/sample', '/top_camera/accel/sample'),
+                ('/camera/top_realsense/color/metadata', '/top_camera/color/metadata'),
+                ('/camera/top_realsense/depth/metadata', '/top_camera/depth/metadata'),
+                ('/camera/top_realsense/extrinsics/depth_to_accel', '/top_camera/extrinsics/depth_to_accel'),
+                ('/camera/top_realsense/extrinsics/depth_to_color', '/top_camera/extrinsics/depth_to_color'),
+                ('/camera/top_realsense/extrinsics/depth_to_depth', '/top_camera/extrinsics/depth_to_depth'),
+                ('/camera/top_realsense/extrinsics/depth_to_gyro', '/top_camera/extrinsics/depth_to_gyro'),
+                ('/camera/top_realsense/gyro/imu_info', '/top_camera/gyro/imu_info'),
+                ('/camera/top_realsense/gyro/metadata', '/top_camera/gyro/metadata'),
+                ('/camera/top_realsense/gyro/sample', '/top_camera/gyro/sample')
+            ]
+        ))
+
+    # RPLIDAR A2M8 (LoCoBot-style config; publishes LaserScan on /scan)
+    if use_lidar:
+        lidar_serial_port = LaunchConfiguration('lidar_serial_port').perform(context)
+        lidar_serial_baudrate = int(LaunchConfiguration('lidar_serial_baudrate').perform(context))
+        lidar_frame_id = LaunchConfiguration('lidar_frame_id').perform(context)
+
+        nodes.append(Node(
+            package='rplidar_ros',
+            executable='rplidar_composition',
+            name='rplidar_composition',
+            output='screen',
+            parameters=[{
+                'serial_port': lidar_serial_port,
+                'serial_baudrate': lidar_serial_baudrate,
+                'frame_id': lidar_frame_id,
+                'inverted': False,
+                'angle_compensate': True,
+            }],
+            remappings=[
+                ('scan', '/scan'),
             ]
         ))
 
@@ -377,6 +505,31 @@ def launch_setup(context, *args, **kwargs):
             }]
         ))
 
+    # Grasp generation node (camera pose -> EEF pose in base_link)
+    # Grasp execution node (full pick sequence state machine)
+    if use_grasp_nodes:
+        nodes.append(Node(
+            package='tidybot_ik',
+            executable='grasp_generation_node',
+            name='grasp_generation',
+            output='screen',
+        ))
+        nodes.append(Node(
+            package='tidybot_ik',
+            executable='grasp_node',
+            name='grasp_node',
+            output='screen',
+        ))
+
+    # Fruit detection node (YOLO apple/banana detection -> /pick_target_local)
+    if use_fruit_detection:
+        nodes.append(Node(
+            package='tidybot_bringup',
+            executable='fruit_detection.py',
+            name='fruit_detection',
+            output='screen',
+        ))
+
     # Microphone recording node
     if use_microphone:
         nodes.append(Node(
@@ -472,6 +625,14 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'load_configs', default_value='true',
             description='Load motor configs from YAML files'
+        ),
+        DeclareLaunchArgument(
+            'use_grasp_nodes', default_value='true',
+            description='Launch grasp_generation_node and grasp_node'
+        ),
+        DeclareLaunchArgument(
+            'use_fruit_detection', default_value='true',
+            description='Launch YOLO fruit detection node (publishes to /pick_target_local)'
         ),
 
         # Setup function handles conditional node creation

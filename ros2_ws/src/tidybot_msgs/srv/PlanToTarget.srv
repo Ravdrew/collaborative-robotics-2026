@@ -17,8 +17,8 @@ bool execute true
 float64 duration 2.0
 
 # Maximum allowed condition number for Jacobian (singularity threshold)
-# Lower = more conservative. Default 100.0 is reasonable.
-float64 max_condition_number 100.0
+# Lower = more conservative. Default 100.0 is reasonable, but to prevent unintended failure, set 500.0 here as default
+float64 max_condition_number 500.0
 
 ---
 

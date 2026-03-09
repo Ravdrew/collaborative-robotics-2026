@@ -36,9 +36,12 @@ install(PROGRAMS
   scripts/test_planner_real.py
   scripts/diagnose_dynamixel.py
   scripts/example_state_machine.py
+  scripts/our_state_machine.py
   scripts/trajectory_tracking.py
   scripts/audio_processing_node.py
   scripts/state_machine_node.py
+  scripts/our_hand_tracking.py
+  scripts/fruit_detection.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
