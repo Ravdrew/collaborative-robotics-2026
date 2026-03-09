@@ -12,6 +12,7 @@ Launches:
 - Arm/gripper wrappers for sim-compatible topics (optional, on by default)
 - Grasp generation node (camera pose -> EEF pose, optional)
 - Grasp execution node (full grasp sequence state machine, optional)
+- Fruit detection node (YOLO apple/banana detection, optional)
 - RViz (optional)
 
 Hardware Setup (Dual U2D2):
@@ -27,6 +28,7 @@ Usage:
     ros2 launch tidybot_bringup real.launch.py use_left_arm:=false  # Right arm only
     ros2 launch tidybot_bringup real.launch.py use_sim_topics:=false  # Disable sim-compatible topics
     ros2 launch tidybot_bringup real.launch.py use_grasp_nodes:=false  # Disable grasp nodes
+    ros2 launch tidybot_bringup real.launch.py use_fruit_detection:=false  # Disable fruit detection
 
 Sim-to-Real Topic Compatibility (use_sim_topics:=true, default):
     When enabled, the following simulation-compatible topics are available:
@@ -81,6 +83,7 @@ def launch_setup(context, *args, **kwargs):
     primary_camera_serial = LaunchConfiguration('primary_camera_serial').perform(context)
     top_camera_serial = LaunchConfiguration('top_camera_serial').perform(context)
     use_grasp_nodes = LaunchConfiguration('use_grasp_nodes').perform(context) == 'true'
+    use_fruit_detection = LaunchConfiguration('use_fruit_detection').perform(context) == 'true'
 
     # Get project root for uv packages
     tidybot2_path = os.environ.get('TIDYBOT2_PATH', '/home/locobot/tidybot2')
@@ -440,6 +443,15 @@ def launch_setup(context, *args, **kwargs):
             output='screen',
         ))
 
+    # Fruit detection node (YOLO apple/banana detection -> /pick_target_local)
+    if use_fruit_detection:
+        nodes.append(Node(
+            package='tidybot_bringup',
+            executable='fruit_detection.py',
+            name='fruit_detection',
+            output='screen',
+        ))
+
     # Microphone recording node
     if use_microphone:
         nodes.append(Node(
@@ -535,6 +547,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_grasp_nodes', default_value='true',
             description='Launch grasp_generation_node and grasp_node'
+        ),
+        DeclareLaunchArgument(
+            'use_fruit_detection', default_value='true',
+            description='Launch YOLO fruit detection node (publishes to /pick_target_local)'
         ),
 
         # Setup function handles conditional node creation

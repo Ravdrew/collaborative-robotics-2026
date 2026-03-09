@@ -7,6 +7,7 @@ Launches:
 - Arm controllers (left + right)
 - Grasp generation node (camera pose -> EEF pose, optional)
 - Grasp execution node (full grasp sequence state machine, optional)
+- Fruit detection node (YOLO apple/banana detection, optional)
 - RViz (optional)
 
 Usage:
@@ -15,6 +16,7 @@ Usage:
     ros2 launch tidybot_bringup sim.launch.py show_mujoco_viewer:=false
     ros2 launch tidybot_bringup sim.launch.py scene:=scene_pickup.xml
     ros2 launch tidybot_bringup sim.launch.py use_grasp_nodes:=false
+    ros2 launch tidybot_bringup sim.launch.py use_fruit_detection:=false
 """
 
 import os
@@ -36,6 +38,7 @@ def launch_setup(context, *args, **kwargs):
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_motion_planner = LaunchConfiguration('use_motion_planner')
     use_grasp_nodes = LaunchConfiguration('use_grasp_nodes')
+    use_fruit_detection = LaunchConfiguration('use_fruit_detection')
 
     # Package paths
     pkg_bringup = FindPackageShare('tidybot_bringup')
@@ -138,6 +141,15 @@ def launch_setup(context, *args, **kwargs):
         condition=IfCondition(use_grasp_nodes),
     )
 
+    # Fruit detection node (YOLO apple/banana detection -> /pick_target_local)
+    fruit_detection = Node(
+        package='tidybot_bringup',
+        executable='fruit_detection.py',
+        name='fruit_detection',
+        output='screen',
+        condition=IfCondition(use_fruit_detection),
+    )
+
     # RViz
     rviz_config = PathJoinSubstitution([pkg_bringup, 'rviz', 'tidybot.rviz'])
     rviz = Node(
@@ -157,6 +169,7 @@ def launch_setup(context, *args, **kwargs):
         motion_planner,
         grasp_generation,
         grasp_node,
+        fruit_detection,
         rviz,
     ]
 
@@ -193,6 +206,11 @@ def generate_launch_description():
         description='Launch grasp_generation_node and grasp_node'
     )
 
+    declare_use_fruit_detection = DeclareLaunchArgument(
+        'use_fruit_detection', default_value='true',
+        description='Launch YOLO fruit detection node (publishes to /pick_target_local)'
+    )
+
     return LaunchDescription([
         # Arguments
         declare_scene,
@@ -201,6 +219,7 @@ def generate_launch_description():
         declare_use_sim_time,
         declare_use_planner,
         declare_use_grasp_nodes,
+        declare_use_fruit_detection,
         # Nodes via OpaqueFunction (resolved after arguments)
         OpaqueFunction(function=launch_setup),
     ])
