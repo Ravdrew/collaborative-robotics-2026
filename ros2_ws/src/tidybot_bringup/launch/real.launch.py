@@ -558,7 +558,7 @@ def launch_setup(context, *args, **kwargs):
     # State machine node (delayed 5s to let other nodes start first)
     if use_state_machine:
         nodes.append(TimerAction(
-            period=5.0,
+            period=8.0,
             actions=[Node(
                 package='tidybot_bringup',
                 executable='our_state_machine.py',
