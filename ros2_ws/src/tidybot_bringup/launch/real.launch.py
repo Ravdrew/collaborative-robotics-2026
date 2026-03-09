@@ -4,8 +4,9 @@ Real Hardware Launch File for TidyBot2.
 Launches:
 - Phoenix 6 mobile base driver
 - Interbotix xs_sdk arm drivers (dual U2D2 setup)
-- RealSense camera driver
-- RPLIDAR driver (optional)
+- Pan-tilt RealSense camera driver
+- Optional top RealSense camera driver
+- Optional RPLIDAR node
 - Robot state publisher (URDF + TF)
 - Image compression (optional, for remote clients)
 - Arm/gripper wrappers for sim-compatible topics (optional, on by default)
@@ -20,6 +21,8 @@ Hardware Setup (Dual U2D2):
 Usage:
     ros2 launch tidybot_bringup real.launch.py
     ros2 launch tidybot_bringup real.launch.py use_rviz:=false
+    ros2 launch tidybot_bringup real.launch.py use_top_camera:=true
+    ros2 launch tidybot_bringup real.launch.py use_lidar:=true use_top_camera:=true
     ros2 launch tidybot_bringup real.launch.py use_base:=false  # Disable base
     ros2 launch tidybot_bringup real.launch.py use_left_arm:=false  # Right arm only
     ros2 launch tidybot_bringup real.launch.py use_sim_topics:=false  # Disable sim-compatible topics
@@ -67,6 +70,7 @@ def launch_setup(context, *args, **kwargs):
     use_left_arm = LaunchConfiguration('use_left_arm').perform(context) == 'true'
     use_pan_tilt = LaunchConfiguration('use_pan_tilt').perform(context) == 'true'
     use_camera = LaunchConfiguration('use_camera').perform(context) == 'true'
+    use_top_camera = LaunchConfiguration('use_top_camera').perform(context) == 'true'
     use_lidar = LaunchConfiguration('use_lidar').perform(context) == 'true'
     use_compression = LaunchConfiguration('use_compression').perform(context) == 'true'
     use_rviz = LaunchConfiguration('use_rviz').perform(context) == 'true'
@@ -74,6 +78,8 @@ def launch_setup(context, *args, **kwargs):
     use_microphone = LaunchConfiguration('use_microphone').perform(context) == 'true'
     use_sim_topics = LaunchConfiguration('use_sim_topics').perform(context) == 'true'
     load_configs = LaunchConfiguration('load_configs').perform(context) == 'true'
+    primary_camera_serial = LaunchConfiguration('primary_camera_serial').perform(context)
+    top_camera_serial = LaunchConfiguration('top_camera_serial').perform(context)
     use_grasp_nodes = LaunchConfiguration('use_grasp_nodes').perform(context) == 'true'
 
     # Get project root for uv packages
@@ -186,6 +192,8 @@ def launch_setup(context, *args, **kwargs):
                 'load_configs': load_configs,
             }],
             output='screen',
+            respawn=True,
+            respawn_delay=2.0,
         ))
 
         # Left arm on U2D2 #2 (/dev/ttyUSB1)
@@ -204,6 +212,8 @@ def launch_setup(context, *args, **kwargs):
                     'load_configs': load_configs,
                 }],
                 output='screen',
+                respawn=True,
+                respawn_delay=2.0,
             ))
 
         # Sim-compatible topic wrappers (when use_sim_topics:=true)
@@ -237,7 +247,39 @@ def launch_setup(context, *args, **kwargs):
             parameters=[{
                 'camera_name': 'camera',
                 'camera_namespace': '',
-                'serial_no': '_023422071689',
+                'serial_no': primary_camera_serial,
+                'base_frame_id': 'link',
+                'enable_color': True,
+                'enable_depth': True,
+                'align_depth.enable': True,
+                'align_depth.enable': True,
+                'enable_infra1': False,
+                'enable_infra2': False,
+                'publish_tf': True,
+                'rgb_camera.color_profile': '640x480x15',
+                'depth_module.depth_profile': '640x480x15',
+            }],
+            remappings=[
+                ('/camera/realsense/color/image_raw', '/camera/color/image_raw'),
+                ('/camera/realsense/depth/image_rect_raw', '/camera/depth/image_raw'),
+                ('/camera/realsense/aligned_depth_to_color/image_raw', '/camera/aligned_depth_to_color/image_raw'),
+                ('/camera/realsense/color/camera_info', '/camera/color/camera_info'),
+                ('/camera/realsense/depth/camera_info', '/camera/depth/camera_info'),
+
+            ]
+        ))
+
+    # Additional top RealSense camera
+    if use_top_camera:
+        nodes.append(Node(
+            package='realsense2_camera',
+            executable='realsense2_camera_node',
+            name='top_realsense',
+            output='screen',
+            parameters=[{
+                'camera_name': 'top_camera',
+                'camera_namespace': '',
+                'serial_no': top_camera_serial,
                 'base_frame_id': 'link',
                 'enable_color': True,
                 'enable_depth': True,
@@ -249,12 +291,69 @@ def launch_setup(context, *args, **kwargs):
                 'depth_module.depth_profile': '640x480x15',
             }],
             remappings=[
-                ('/camera/realsense/color/image_raw', '/camera/color/image_raw'),
-                ('/camera/realsense/depth/image_rect_raw', '/camera/depth/image_raw'),
-                ('/camera/realsense/color/camera_info', '/camera/color/camera_info'),
-                ('/camera/realsense/depth/camera_info', '/camera/depth/camera_info'),
-                ('/camera/realsense/aligned_depth_to_color/image_raw', '/camera/aligned_depth_to_color/image_raw')
+                # Main image streams
+                ('/camera/top_realsense/color/image_raw', '/top_camera/color/image_raw'),
+                ('/camera/top_realsense/depth/image_rect_raw', '/top_camera/depth/image_raw'),
+                ('/camera/top_realsense/aligned_depth_to_color/image_raw', '/top_camera/aligned_depth_to_color/image_raw'),
+                ('/camera/top_realsense/color/camera_info', '/top_camera/color/camera_info'),
+                ('/camera/top_realsense/depth/camera_info', '/top_camera/depth/camera_info'),
+                # Metadata / IMU / extrinsics
+                ('/camera/top_realsense/accel/imu_info', '/top_camera/accel/imu_info'),
+                ('/camera/top_realsense/accel/metadata', '/top_camera/accel/metadata'),
+                ('/camera/top_realsense/accel/sample', '/top_camera/accel/sample'),
+                ('/camera/top_realsense/color/metadata', '/top_camera/color/metadata'),
+                ('/camera/top_realsense/depth/metadata', '/top_camera/depth/metadata'),
+                ('/camera/top_realsense/extrinsics/depth_to_accel', '/top_camera/extrinsics/depth_to_accel'),
+                ('/camera/top_realsense/extrinsics/depth_to_color', '/top_camera/extrinsics/depth_to_color'),
+                ('/camera/top_realsense/extrinsics/depth_to_depth', '/top_camera/extrinsics/depth_to_depth'),
+                ('/camera/top_realsense/extrinsics/depth_to_gyro', '/top_camera/extrinsics/depth_to_gyro'),
+                ('/camera/top_realsense/gyro/imu_info', '/top_camera/gyro/imu_info'),
+                ('/camera/top_realsense/gyro/metadata', '/top_camera/gyro/metadata'),
+                ('/camera/top_realsense/gyro/sample', '/top_camera/gyro/sample')
+            ]
+        ))
 
+    # Additional top RealSense camera
+    if use_top_camera:
+        nodes.append(Node(
+            package='realsense2_camera',
+            executable='realsense2_camera_node',
+            name='top_realsense',
+            output='screen',
+            parameters=[{
+                'camera_name': 'top_camera',
+                'camera_namespace': '',
+                'serial_no': top_camera_serial,
+                'base_frame_id': 'link',
+                'enable_color': True,
+                'enable_depth': True,
+                'align_depth.enable': True,
+                'enable_infra1': False,
+                'enable_infra2': False,
+                'publish_tf': True,
+                'rgb_camera.color_profile': '640x480x15',
+                'depth_module.depth_profile': '640x480x15',
+            }],
+            remappings=[
+                # Main image streams
+                ('/camera/top_realsense/color/image_raw', '/top_camera/color/image_raw'),
+                ('/camera/top_realsense/depth/image_rect_raw', '/top_camera/depth/image_raw'),
+                ('/camera/top_realsense/aligned_depth_to_color/image_raw', '/top_camera/aligned_depth_to_color/image_raw'),
+                ('/camera/top_realsense/color/camera_info', '/top_camera/color/camera_info'),
+                ('/camera/top_realsense/depth/camera_info', '/top_camera/depth/camera_info'),
+                # Metadata / IMU / extrinsics
+                ('/camera/top_realsense/accel/imu_info', '/top_camera/accel/imu_info'),
+                ('/camera/top_realsense/accel/metadata', '/top_camera/accel/metadata'),
+                ('/camera/top_realsense/accel/sample', '/top_camera/accel/sample'),
+                ('/camera/top_realsense/color/metadata', '/top_camera/color/metadata'),
+                ('/camera/top_realsense/depth/metadata', '/top_camera/depth/metadata'),
+                ('/camera/top_realsense/extrinsics/depth_to_accel', '/top_camera/extrinsics/depth_to_accel'),
+                ('/camera/top_realsense/extrinsics/depth_to_color', '/top_camera/extrinsics/depth_to_color'),
+                ('/camera/top_realsense/extrinsics/depth_to_depth', '/top_camera/extrinsics/depth_to_depth'),
+                ('/camera/top_realsense/extrinsics/depth_to_gyro', '/top_camera/extrinsics/depth_to_gyro'),
+                ('/camera/top_realsense/gyro/imu_info', '/top_camera/gyro/imu_info'),
+                ('/camera/top_realsense/gyro/metadata', '/top_camera/gyro/metadata'),
+                ('/camera/top_realsense/gyro/sample', '/top_camera/gyro/sample')
             ]
         ))
 
@@ -309,7 +408,6 @@ def launch_setup(context, *args, **kwargs):
 
     # Motion planner (IK) for real hardware
     if use_planner:
-        urdf_path = PathJoinSubstitution([pkg_description, 'urdf', 'tidybot_wx250s.urdf.xacro'])
         nodes.append(Node(
             package='tidybot_ik',
             executable='motion_planner_real_node',
@@ -384,11 +482,23 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'use_camera', default_value='true',
-            description='Launch RealSense camera driver'
+            description='Launch pan-tilt RealSense camera driver'
         ),
         DeclareLaunchArgument(
-            'use_lidar', default_value='true',
-            description='Launch RPLIDAR driver (sensor_msgs/msg/LaserScan on /scan)'
+            'primary_camera_serial', default_value='_023422071689',
+            description='Serial number for primary pan-tilt RealSense camera'
+        ),
+        DeclareLaunchArgument(
+            'top_camera_serial', default_value='_332522075252',
+            description='Serial number for top RealSense camera'
+        ),
+        DeclareLaunchArgument(
+            'use_top_camera', default_value='false',
+            description='Launch the top RealSense camera driver'
+        ),
+        DeclareLaunchArgument(
+            'use_lidar', default_value='false',
+            description='Launch the RPLIDAR driver'
         ),
         DeclareLaunchArgument(
             'lidar_serial_port', default_value='/dev/rplidar',

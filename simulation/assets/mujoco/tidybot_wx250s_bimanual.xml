@@ -353,8 +353,8 @@
     <position name="joint_th" joint="joint_th" kp="50000" kv="1000"/>
 
     <!-- Pan-Tilt Camera actuators -->
-    <position name="camera_pan" joint="camera_pan" kp="100" kv="10" forcerange="-2 2"/>
-    <position name="camera_tilt" joint="camera_tilt" kp="100" kv="10" forcerange="-2 2"/>
+    <position name="camera_pan" joint="camera_pan" kp="10000" kv="500"/>
+    <position name="camera_tilt" joint="camera_tilt" kp="10000" kv="500"/>
 
     <!-- Right WX250s arm actuators (6-DOF) -->
     <position class="small_actuator" name="right_waist" joint="right_waist"/>

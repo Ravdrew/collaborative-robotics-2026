@@ -1342,7 +1342,16 @@ void InterbotixDriverXS::read_joint_states()
       float velocity = 0;
       float effort = 0;
 
-      if (strcmp(dxl_wb.getModelName(id), "XL-320") == 0) {
+      const char * model_name = dxl_wb.getModelName(id);
+      if (model_name == nullptr) {
+        // USB dropouts can cause temporary lookup failures; avoid null dereference crash.
+        XSLOG_WARN(
+          "Model name lookup failed for ID %d while reading joint states; using current conversion.",
+          id);
+        model_name = "";
+      }
+
+      if (strcmp(model_name, "XL-320") == 0) {
         effort = dxl_wb.convertValue2Load(get_current.at(index));
       } else {
         effort = dxl_wb.convertValue2Current(get_current.at(index));

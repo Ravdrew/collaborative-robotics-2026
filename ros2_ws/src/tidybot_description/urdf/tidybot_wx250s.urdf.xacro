@@ -60,11 +60,11 @@
   <joint name="base_to_camera_mount" type="fixed">
     <parent link="base_link"/>
     <child link="camera_mount"/>
-    <origin xyz="0 -0.1125 0.279" rpy="0 0 -1.5708"/>
+    <origin xyz="0 -0.1125 0.279" rpy="0 0 0"/>
   </joint>
 
-  <!-- ==================== LIDAR STACK (EXTRUSION + MOUNT + LIDAR) ==================== -->
-  <link name="lidar_extrusion">
+  <!-- ==================== TOP SENSOR STACK (SHARED EXTRUSION + LIDAR + TOP CAMERA) ==================== -->
+  <link name="top_camera_extrusion">
     <visual>
       <geometry>
         <!-- This STL is already in meters -->
@@ -78,19 +78,17 @@
       <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
     </inertial>
   </link>
-  <joint name="base_to_lidar_extrusion" type="fixed">
+  <joint name="base_to_top_camera_extrusion" type="fixed">
     <parent link="base_link"/>
-    <child link="lidar_extrusion"/>
-    <!-- Requested placement: x=0, y=190mm in base_link frame -->
+    <child link="top_camera_extrusion"/>
+    <!-- Shared top-sensor extrusion placement -->
     <origin xyz="0.0 0.196 0.5471" rpy="0 0 0"/>
   </joint>
 
   <link name="lidar_mount">
     <visual>
-      <!-- Keep mesh orientation unchanged while mount frame is reoriented -->
       <origin xyz="0 0 0" rpy="-1.5708 0 0"/>
       <geometry>
-        <!-- This STL is already in meters -->
         <mesh filename="${mesh_path}/base/Lidar_Mount.stl" scale="1 1 1"/>
       </geometry>
       <material name="dark_grey"/>
@@ -101,11 +99,10 @@
       <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
     </inertial>
   </link>
-  <joint name="lidar_extrusion_to_mount" type="fixed">
-    <parent link="lidar_extrusion"/>
+  <joint name="top_camera_extrusion_to_lidar_mount" type="fixed">
+    <parent link="top_camera_extrusion"/>
     <child link="lidar_mount"/>
-    <!-- Reorient mount frame so z_new aligns with +z_base (old z -> old -y) -->
-    <origin xyz="0 0 0.229" rpy="0 0 0"/>
+    <origin xyz="0 0 0.237" rpy="0 0 0"/>
   </joint>
 
   <link name="lidar_link">
@@ -132,16 +129,57 @@
   <joint name="lidar_mount_to_lidar" type="fixed">
     <parent link="lidar_mount"/>
     <child link="lidar_link"/>
-    <!-- z_lidar aligns with +z_base_link; x_lidar points toward +y_base_link -->
     <origin xyz="0 0 0.029" rpy="0 0 1.5708"/>
   </joint>
 
-  <!-- Match RPLIDAR frame_id:=laser from real.launch.py -->
   <link name="laser"/>
   <joint name="lidar_to_laser" type="fixed">
     <parent link="lidar_link"/>
     <child link="laser"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="top_camera_mount">
+    <visual>
+      <!-- Rotate the STL in its own frame without changing the mount link frame. -->
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <mesh filename="${mesh_path}/base/top_camera_mount_20deg.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <inertial>
+      <origin xyz="0 0 0"/>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+  </link>
+  <joint name="top_camera_extrusion_to_mount" type="fixed">
+    <parent link="top_camera_extrusion"/>
+    <child link="top_camera_mount"/>
+    <origin xyz="0 -0.011 0.150454" rpy="0 0 -1.5708"/>
+  </joint>
+
+  <link name="top_camera_link">
+    <visual>
+      <!-- Keep top_camera_link at the camera mesh center (same convention as camera_link). -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="${mesh_path}/locobot_pantilt/locobot_camera.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <inertial>
+      <origin xyz="0.011808 0.001682 0.000003"/>
+      <mass value="0.072"/>
+      <inertia ixx="0.0000465400" ixy="0" ixz="0" iyy="0.0000069128" iyz="0" izz="0.0000468600"/>
+    </inertial>
+  </link>
+  <joint name="top_camera_mount_to_camera" type="fixed">
+    <parent link="top_camera_mount"/>
+    <child link="top_camera_link"/>
+    <!-- Adjusted so camera mesh pose remains consistent after moving link origin to mesh center. -->
+    <origin xyz="0.029227 0.0175 0.006047" rpy="0 0.3491 0"/>
   </joint>
 
   <!-- ==================== PAN-TILT CAMERA SYSTEM ==================== -->
@@ -225,6 +263,65 @@
     <joint name="camera_to_depth_optical" type="fixed">
       <parent link="camera_link"/>
       <child link="camera_depth_optical_frame"/>
+      <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
+
+    <!-- D435/D435i nominal frame chain (used only when optical frames are requested in URDF). -->
+    <link name="top_camera_depth_frame"/>
+    <joint name="top_camera_to_depth" type="fixed">
+      <parent link="top_camera_link"/>
+      <child link="top_camera_depth_frame"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="top_camera_depth_optical_frame"/>
+    <joint name="top_camera_depth_to_depth_optical" type="fixed">
+      <parent link="top_camera_depth_frame"/>
+      <child link="top_camera_depth_optical_frame"/>
+      <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
+
+    <link name="top_camera_color_frame"/>
+    <joint name="top_camera_to_color" type="fixed">
+      <parent link="top_camera_link"/>
+      <!-- D435/D435i nominal depth-to-color baseline -->
+      <child link="top_camera_color_frame"/>
+      <origin xyz="0 0.015 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="top_camera_color_optical_frame"/>
+    <joint name="top_camera_color_to_color_optical" type="fixed">
+      <parent link="top_camera_color_frame"/>
+      <child link="top_camera_color_optical_frame"/>
+      <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
+
+    <!-- D435i nominal IMU frames -->
+    <link name="top_camera_accel_frame"/>
+    <joint name="top_camera_to_accel" type="fixed">
+      <parent link="top_camera_link"/>
+      <child link="top_camera_accel_frame"/>
+      <origin xyz="-0.01174 -0.00552 0.0051" rpy="0 0 0"/>
+    </joint>
+
+    <link name="top_camera_accel_optical_frame"/>
+    <joint name="top_camera_accel_to_accel_optical" type="fixed">
+      <parent link="top_camera_accel_frame"/>
+      <child link="top_camera_accel_optical_frame"/>
+      <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    </joint>
+
+    <link name="top_camera_gyro_frame"/>
+    <joint name="top_camera_to_gyro" type="fixed">
+      <parent link="top_camera_link"/>
+      <child link="top_camera_gyro_frame"/>
+      <origin xyz="-0.01174 -0.00552 0.0051" rpy="0 0 0"/>
+    </joint>
+
+    <link name="top_camera_gyro_optical_frame"/>
+    <joint name="top_camera_gyro_to_gyro_optical" type="fixed">
+      <parent link="top_camera_gyro_frame"/>
+      <child link="top_camera_gyro_optical_frame"/>
       <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
     </joint>
   </xacro:if>
