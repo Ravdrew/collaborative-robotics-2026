@@ -28,8 +28,10 @@ from std_msgs.msg import Bool, String
 
 class SMState(str, Enum):
     AUDIO_PROCESSING = "audio_processing"
+    PICK_EXPLORATION = "pick_exploration"
     PICK_NAVIGATION = "pick_navigation"
     PICKING = "picking"
+    PICK_EXPLORATION = "pick_exploration"
     PLACE_NAVIGATION = "place_navigation"
     PLACING = "placing"
     FINISHED = "finished"
