@@ -179,6 +179,9 @@ class GraspNode(Node):
         self.current_pan       = 0.0
         self.current_tilt      = 0.0
 
+        # Pan camera to neutral on startup (fires once after 0.5 s)
+        self._startup_timer = self.create_timer(0.5, self._startup_pan)
+
         # 20 Hz control loop
         self.create_timer(0.05, self._control_loop)
 
@@ -312,6 +315,12 @@ class GraspNode(Node):
         msg = Float64MultiArray()
         msg.data = [pan, tilt]
         self._pan_tilt_pub.publish(msg)
+
+    def _startup_pan(self) -> None:
+        """Pan camera to neutral once on startup, then cancel this timer."""
+        self.get_logger().info('Startup: panning camera to neutral (pan=0.0, tilt=0.0).')
+        self._send_pan_tilt(0.0, 0.0)
+        self._startup_timer.cancel()
 
     # ------------------------------------------------------------------
     # State machine
