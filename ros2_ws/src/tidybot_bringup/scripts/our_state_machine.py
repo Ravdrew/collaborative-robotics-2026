@@ -173,9 +173,6 @@ class StateMachineNode(Node):
         )
 
         # ---- Timers ----
-        state_hz = float(self.get_parameter("state_pub_hz").value)
-        self.create_timer(1.0 / max(state_hz, 0.1), self._publish_state)
-
         heartbeat_period = float(self.get_parameter("heartbeat_log_s").value)
         self.create_timer(max(0.5, heartbeat_period), self._heartbeat_log)
         self.create_timer(0.2, self._placing_done_sim_fallback_tick)

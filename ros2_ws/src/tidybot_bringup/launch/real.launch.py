@@ -55,7 +55,7 @@ Prerequisites:
 import os
 import sys
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, TimerAction
 from launch.conditions import IfCondition
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -82,6 +82,7 @@ def launch_setup(context, *args, **kwargs):
     use_planner = LaunchConfiguration('use_planner').perform(context) == 'true'
     use_microphone = LaunchConfiguration('use_microphone').perform(context) == 'true'
     use_audio_processing = LaunchConfiguration('use_audio_processing').perform(context) == 'true'
+    use_state_machine = LaunchConfiguration('use_state_machine').perform(context) == 'true'
     use_sim_topics = LaunchConfiguration('use_sim_topics').perform(context) == 'true'
     load_configs = LaunchConfiguration('load_configs').perform(context) == 'true'
     primary_camera_serial = LaunchConfiguration('primary_camera_serial').perform(context)
@@ -554,6 +555,18 @@ def launch_setup(context, *args, **kwargs):
             output='screen',
         ))
 
+    # State machine node (delayed 5s to let other nodes start first)
+    if use_state_machine:
+        nodes.append(TimerAction(
+            period=5.0,
+            actions=[Node(
+                package='tidybot_bringup',
+                executable='our_state_machine.py',
+                name='state_machine',
+                output='screen',
+            )],
+        ))
+
     return nodes
 
 
@@ -627,6 +640,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_audio_processing', default_value='true',
             description='Launch audio processing node (STT + Gemini parsing)'
+        ),
+        DeclareLaunchArgument(
+            'use_state_machine', default_value='true',
+            description='Launch state machine node (delayed 5s)'
         ),
         DeclareLaunchArgument(
             'use_planner', default_value='true',
