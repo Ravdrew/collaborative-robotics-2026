@@ -79,6 +79,7 @@ _FINGER_OPEN_POS = 0.037
 
 class State(Enum):
     IDLE              = auto()  # waiting for /fsm_pick_request or /fsm_place_request
+    PAN_CAMERA_DOWN   = auto()  # tilting camera down to see workspace before relaying target
     WAIT_EEF_POSE     = auto()  # waiting for /EEF_pose_command after relaying pick target
     PLAN_GRASP        = auto()  # issuing /plan_to_target call (single entry tick)
     WAIT_PLAN_GRASP   = auto()  # waiting for plan failure OR EEF arrival at target
@@ -87,6 +88,7 @@ class State(Enum):
     PLAN_NEUTRAL      = auto()  # issuing /plan_to_target for retract (single entry tick)
     WAIT_PLAN_NEUTRAL = auto()  # waiting for retract future to resolve
     CHECK_GRASP       = auto()  # inspect finger position
+    PAN_CAMERA_UP     = auto()  # tilting camera back to neutral before signalling done
     DONE              = auto()  # action succeeded
     FAILED            = auto()  # action failed
 
@@ -103,6 +105,7 @@ class GraspNode(Node):
         self.declare_parameter('gripper_toggle_time', 5.0)
         self.declare_parameter('grasp_finger_threshold', 0.033)
         self.declare_parameter('eef_arrival_threshold', 0.05)
+        self.declare_parameter('camera_pan_time', 1.5)
         # Neutral/retract pose in base_link (safe overhead position)
         self.declare_parameter('neutral_x',  -0.15)
         self.declare_parameter('neutral_y', -0.40)
@@ -112,10 +115,11 @@ class GraspNode(Node):
         self.declare_parameter('neutral_qy', _FINGERS_DOWN_HORIZONTAL[2])
         self.declare_parameter('neutral_qz', _FINGERS_DOWN_HORIZONTAL[3])
 
-        self.arm_name               = None        
+        self.arm_name               = None
         self.gripper_toggle_time    = self.get_parameter('gripper_toggle_time').get_parameter_value().double_value
         self.grasp_finger_threshold = self.get_parameter('grasp_finger_threshold').get_parameter_value().double_value
         self.eef_arrival_threshold  = self.get_parameter('eef_arrival_threshold').get_parameter_value().double_value
+        self.camera_pan_time        = self.get_parameter('camera_pan_time').get_parameter_value().double_value
 
         neutral = Pose()
         neutral.position.x    = self.get_parameter('neutral_x').get_parameter_value().double_value
@@ -201,34 +205,26 @@ class GraspNode(Node):
         self._place_target_pose = msg
     
     def _on_pick_start(self, msg: Bool) -> None:
-        """Received a pick command — move to target then CLOSE gripper."""
+        """Received a pick command — pan camera down, then move to target and CLOSE gripper."""
         if self._state != State.IDLE:
             self.get_logger().warn('Action already in progress — ignoring pick request.')
             return
-        if self._pick_target_pose is None:
-            self.get_logger().warn('No pick target pose received yet — ignoring pick request.')
-            return
-        self.get_logger().info('Pick request received — relaying to grasp_generation_node.')
-        self.action           = 'pick'
-        self._waiting_for_eef = True
-        self._eef_pose        = None
-        self._object_pose_pub.publish(self._pick_target_pose)
-        self._transition(State.WAIT_EEF_POSE)
+        self.get_logger().info('Pick request received — panning camera down.')
+        self.action    = 'pick'
+        self._eef_pose = None
+        self._pick_target_pose = None
+        self._transition(State.PAN_CAMERA_DOWN)
 
     def _on_place_start(self, msg: Bool) -> None:
-        """Received a place command — move to target then OPEN gripper."""
+        """Received a place command — pan camera down, then move to target and OPEN gripper."""
         if self._state != State.IDLE:
             self.get_logger().warn('Action already in progress — ignoring place request.')
             return
-        if self._place_target_pose is None:
-            self.get_logger().warn('No place target pose received yet — ignoring place request.')
-            return
-        self.get_logger().info('Place request received — relaying to grasp_generation_node.')
-        self.action           = 'place'
-        self._waiting_for_eef = True
-        self._eef_pose        = None
-        self._object_pose_pub.publish(self._place_target_pose)
-        self._transition(State.WAIT_EEF_POSE)
+        self.get_logger().info('Place request received — panning camera down.')
+        self.action    = 'place'
+        self._eef_pose = None
+        self._place_target_pose = None
+        self._transition(State.PAN_CAMERA_DOWN)
 
     def _on_eef_pose(self, msg: Pose) -> None:
         """Capture the EEF pose only when we are waiting for one."""
@@ -311,15 +307,11 @@ class GraspNode(Node):
         p = self._eef_pose.position
         return math.sqrt((t.x - p.x)**2 + (t.y - p.y)**2 + (t.z - p.z)**2)
 
-    def send_pan_tilt(self, pan, tilt, duration=1.0):
-        """Send pan-tilt command."""
+    def _send_pan_tilt(self, pan: float, tilt: float) -> None:
+        """Publish a single pan-tilt command (non-blocking)."""
         msg = Float64MultiArray()
         msg.data = [pan, tilt]
-        self.get_logger().info(f'Sending pan-tilt command: pan={pan:.3f}, tilt={tilt:.3f}')
-        for _ in range(int(duration * 20)):
-            self._pan_tilt_pub.publish(msg)
-            rclpy.spin_once(self, timeout_sec=0.05)
-        self.get_logger().info(f'Pan-tilt command sent: pan={pan:.3f}, tilt={tilt:.3f}')
+        self._pan_tilt_pub.publish(msg)
 
     # ------------------------------------------------------------------
     # State machine
@@ -331,6 +323,25 @@ class GraspNode(Node):
         # ── IDLE ─────────────────────────────────────────────────────────
         if self._state == State.IDLE:
             return
+
+        # ── PAN_CAMERA_DOWN ──────────────────────────────────────────────
+        elif self._state == State.PAN_CAMERA_DOWN:
+            elapsed = self._elapsed()
+            if elapsed < 0.1:
+                self.get_logger().info(f'Panning camera down (tilt={_CAMERA_PAN:.2f}) ...')
+            self._send_pan_tilt(0.0, _CAMERA_PAN)
+            if elapsed > self.camera_pan_time:
+                # Camera is in position — wait for a target pose then relay it
+                target_pose = (self._pick_target_pose if self.action == 'pick'
+                               else self._place_target_pose)
+                if target_pose is None:
+                    self.get_logger().debug(
+                        f'Camera down — waiting for /{self.action}_target_local ...')
+                    return
+                self.get_logger().info('Camera down — relaying target to grasp_generation_node.')
+                self._waiting_for_eef = True
+                self._object_pose_pub.publish(target_pose)
+                self._transition(State.WAIT_EEF_POSE)
 
         # ── WAIT_EEF_POSE ────────────────────────────────────────────────
         elif self._state == State.WAIT_EEF_POSE:
@@ -454,7 +465,7 @@ class GraspNode(Node):
 
             if self.action == 'place':
                 self.get_logger().info('Place action — skipping grasp check.')
-                self._transition(State.DONE)
+                self._transition(State.PAN_CAMERA_UP)
                 return
 
             if self._finger_pos is None:
@@ -470,10 +481,20 @@ class GraspNode(Node):
 
             if self._finger_pos < self.grasp_finger_threshold:
                 self.get_logger().info('Grasp SUCCESSFUL — object detected in gripper.')
-                self._transition(State.DONE)
+                self._transition(State.PAN_CAMERA_UP)
             else:
                 self.get_logger().warn('Grasp FAILED — fingers fully closed, no object detected.')
                 self._transition(State.FAILED)
+
+        # ── PAN_CAMERA_UP ────────────────────────────────────────────────
+        elif self._state == State.PAN_CAMERA_UP:
+            elapsed = self._elapsed()
+            if elapsed < 0.1:
+                self.get_logger().info('Panning camera back to neutral (tilt=0.0) ...')
+            self._send_pan_tilt(0.0, 0.0)
+            if elapsed > self.camera_pan_time:
+                self.get_logger().info('Camera back to neutral.')
+                self._transition(State.DONE)
 
         # ── DONE ─────────────────────────────────────────────────────────
         elif self._state == State.DONE:
@@ -510,7 +531,6 @@ def main(args=None):
     node = GraspNode()
 
     try:
-        node.send_pan_tilt(0.0, _CAMERA_PAN, 1.0)
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
