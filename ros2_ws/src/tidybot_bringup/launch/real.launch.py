@@ -81,6 +81,7 @@ def launch_setup(context, *args, **kwargs):
     use_rviz = LaunchConfiguration('use_rviz').perform(context) == 'true'
     use_planner = LaunchConfiguration('use_planner').perform(context) == 'true'
     use_microphone = LaunchConfiguration('use_microphone').perform(context) == 'true'
+    use_audio_processing = LaunchConfiguration('use_audio_processing').perform(context) == 'true'
     use_sim_topics = LaunchConfiguration('use_sim_topics').perform(context) == 'true'
     load_configs = LaunchConfiguration('load_configs').perform(context) == 'true'
     primary_camera_serial = LaunchConfiguration('primary_camera_serial').perform(context)
@@ -543,6 +544,15 @@ def launch_setup(context, *args, **kwargs):
             }]
         ))
 
+    # Audio processing node (STT + Gemini parsing)
+    if use_audio_processing:
+        nodes.append(Node(
+            package='tidybot_bringup',
+            executable='audio_processing_node.py',
+            name='audio_processing',
+            output='screen',
+        ))
+
     return nodes
 
 
@@ -612,6 +622,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_microphone', default_value='true',
             description='Launch microphone recording node'
+        ),
+        DeclareLaunchArgument(
+            'use_audio_processing', default_value='true',
+            description='Launch audio processing node (STT + Gemini parsing)'
         ),
         DeclareLaunchArgument(
             'use_planner', default_value='true',
