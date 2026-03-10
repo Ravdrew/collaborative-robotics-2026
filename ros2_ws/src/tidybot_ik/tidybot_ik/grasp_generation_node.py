@@ -73,7 +73,7 @@ class GraspGenerationNode(Node):
 
         # Parameters
         self.declare_parameter('camera_frame', 'camera_color_optical_frame')
-        self.declare_parameter('robot_frame', 'base_link')
+        self.declare_parameter('robot_frame', 'base_footprint')
         self.declare_parameter('grasp_height_offset', 0.05)
 
         self.camera_frame = (

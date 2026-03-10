@@ -72,6 +72,7 @@ _GRIPPER_OPEN   = 0.1
 _GRIPPER_CLOSED = 0.9
 
 _CAMERA_PAN = 0.6
+_CAMERA_NEUTRAL = 0.3
 
 # Finger joint open position (metres) — from MuJoCo model range
 _FINGER_OPEN_POS = 0.037
@@ -319,7 +320,7 @@ class GraspNode(Node):
     def _startup_pan(self) -> None:
         """Pan camera to neutral once on startup, then cancel this timer."""
         self.get_logger().info('Startup: panning camera to neutral (pan=0.0, tilt=0.0).')
-        self._send_pan_tilt(0.0, 0.0)
+        self._send_pan_tilt(0.0, _CAMERA_NEUTRAL)
         self._startup_timer.cancel()
 
     # ------------------------------------------------------------------
@@ -500,7 +501,7 @@ class GraspNode(Node):
             elapsed = self._elapsed()
             if elapsed < 0.1:
                 self.get_logger().info('Panning camera back to neutral (tilt=0.0) ...')
-            self._send_pan_tilt(0.0, 0.0)
+            self._send_pan_tilt(0.0, _CAMERA_NEUTRAL)
             if elapsed > self.camera_pan_time:
                 self.get_logger().info('Camera back to neutral.')
                 self._transition(State.DONE)
