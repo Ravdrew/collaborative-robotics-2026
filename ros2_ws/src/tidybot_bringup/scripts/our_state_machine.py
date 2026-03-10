@@ -1,27 +1,35 @@
 #!/usr/bin/env python3
 """
-Task-oriented ROS 2 state machine for navigation + pick/place orchestration.
+Task-oriented ROS 2 state machine for exploration + navigation + pick/place.
 
 State flow:
 1) audio_processing:
    wait for non-empty /pick_target and /place_target.
-2) pick_navigation:
-   wait for a pick nav goal, publish /cmd_nav, then wait for /nav_success true.
-3) picking:
-   publish one-shot /fsm_pick_request and wait for /successful_pick true.
-4) place_navigation:
-   wait for a place nav goal, publish /cmd_nav, then wait for /nav_success true.
-5) placing:
-   publish one-shot /fsm_place_request and wait for /placing_done (or sim fallback).
-6) finished:
+2) pick_exploration:
+   start frontier exploration, wait for fruit detection via /pick_target_local.
+3) pick_navigation:
+   send NavigateToPose goal to Nav2, wait for result.
+4) picking:
+   publish /fsm_pick_request and wait for /successful_pick true.
+5) place_exploration:
+   start frontier exploration, wait for bowl detection via /place_target_local.
+6) place_navigation:
+   send NavigateToPose goal to Nav2, wait for result.
+7) placing:
+   publish /fsm_place_request and wait for /placing_done.
+8) finished:
    terminal state.
 """
 
+import math
 from enum import Enum
 from typing import Optional
 
 import rclpy
-from geometry_msgs.msg import PointStamped, Pose2D, PoseStamped
+import tf2_ros
+from geometry_msgs.msg import Pose, PoseStamped, Quaternion
+from nav2_msgs.action import NavigateToPose
+from rclpy.action import ActionClient
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
@@ -31,62 +39,43 @@ class SMState(str, Enum):
     PICK_EXPLORATION = "pick_exploration"
     PICK_NAVIGATION = "pick_navigation"
     PICKING = "picking"
-    PICK_EXPLORATION = "pick_exploration"
+    PLACE_EXPLORATION = "place_exploration"
     PLACE_NAVIGATION = "place_navigation"
     PLACING = "placing"
     FINISHED = "finished"
 
 
 class StateMachineNode(Node):
-    # Initialize FSM state, topics, timers, and wiring.
     def __init__(self):
         super().__init__("state_machine_node")
 
-        # Core state publication and logging parameters.
+        # ---- Parameters ----
         self.declare_parameter("state_topic", "/state_machine")
-        self.declare_parameter("state_pub_hz", 5.0)
         self.declare_parameter("heartbeat_log_s", 2.0)
-
-        # Audio/intent gate input parameters.
         self.declare_parameter("pick_target_topic", "/pick_target")
         self.declare_parameter("place_target_topic", "/place_target")
-
-        # Navigation and task completion input/output parameters.
-        self.declare_parameter("cmd_nav_topic", "/cmd_nav")
-        self.declare_parameter("nav_success_topic", "/nav_success")
+        self.declare_parameter("pick_target_local_topic", "/pick_target_local")
+        self.declare_parameter("place_target_local_topic", "/place_target_local")
         self.declare_parameter("successful_pick_topic", "/successful_pick")
         self.declare_parameter("placing_done_topic", "/placing_done")
-        self.declare_parameter("placing_done_sim_topic", "/placing_done_sim")
-
-        # Canonical and legacy navigation goal input parameters.
-        self.declare_parameter("fsm_pick_nav_goal_topic", "/fsm_pick_nav_goal")
-        self.declare_parameter("fsm_place_nav_goal_topic", "/fsm_place_nav_goal")
-        self.declare_parameter("pick_target_global_topic", "/pick_target_global")
-        self.declare_parameter("place_target_local_topic", "/place_target_local")
-
-        # Pick/place handoff signaling parameters.
         self.declare_parameter("fsm_pick_request_topic", "/fsm_pick_request")
         self.declare_parameter("fsm_place_request_topic", "/fsm_place_request")
-
-        # Sim-only placing timeout fallback parameters.
-        self.declare_parameter("enable_placing_done_sim_fallback", False)
-        self.declare_parameter("placing_done_sim_delay_s", 5.0)
+        self.declare_parameter("explore_resume_topic", "explore/resume")
+        self.declare_parameter("nav_offset_m", 0.25)
+        self.declare_parameter("camera_frame", "camera_color_optical_frame")
+        self.declare_parameter("map_frame", "map")
 
         # ---- State ----
         self.state: SMState = SMState.AUDIO_PROCESSING
         self.pick_target_ok = False
         self.place_target_ok = False
-        self.pending_nav_phase: Optional[str] = None
-        self.last_cmd_nav: Optional[Pose2D] = None
-        self.nav_goal_sent_ns: Optional[int] = None
-        self.placing_done_sim_deadline_ns: Optional[int] = None
+        self.pick_map_pose: Optional[Pose] = None
+        self.place_map_pose: Optional[Pose] = None
+        self.nav_goal_handle = None
 
-        self.enable_placing_done_sim_fallback = bool(
-            self.get_parameter("enable_placing_done_sim_fallback").value
-        )
-        self.placing_done_sim_delay_s = float(
-            self.get_parameter("placing_done_sim_delay_s").value
-        )
+        self.nav_offset_m = float(self.get_parameter("nav_offset_m").value)
+        self.camera_frame = str(self.get_parameter("camera_frame").value)
+        self.map_frame = str(self.get_parameter("map_frame").value)
 
         self.transition_count = 0
         self.last_transition_reason = "startup"
@@ -94,25 +83,26 @@ class StateMachineNode(Node):
         self.event_counts = {
             "pick_target": 0,
             "place_target": 0,
-            "fsm_pick_nav_goal": 0,
-            "fsm_place_nav_goal": 0,
-            "pick_target_global": 0,
+            "pick_target_local": 0,
             "place_target_local": 0,
-            "cmd_nav_sent": 0,
-            "nav_success": 0,
             "successful_pick": 0,
+            "placing_done": 0,
+            "explore_resume_sent": 0,
+            "nav_goal_sent": 0,
             "fsm_pick_request_sent": 0,
             "fsm_place_request_sent": 0,
-            "placing_done": 0,
-            "placing_done_sim": 0,
         }
+
+        # ---- TF2 ----
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         # ---- Publishers ----
         self.state_pub = self.create_publisher(
             String, str(self.get_parameter("state_topic").value), 10
         )
-        self.cmd_nav_pub = self.create_publisher(
-            Pose2D, str(self.get_parameter("cmd_nav_topic").value), 10
+        self.explore_resume_pub = self.create_publisher(
+            Bool, str(self.get_parameter("explore_resume_topic").value), 10
         )
         self.fsm_pick_request_pub = self.create_publisher(
             Bool, str(self.get_parameter("fsm_pick_request_topic").value), 10
@@ -123,40 +113,28 @@ class StateMachineNode(Node):
 
         # ---- Subscriptions ----
         self.create_subscription(
-            String, str(self.get_parameter("pick_target_topic").value), self._on_pick_target, 10
-        )
-        self.create_subscription(
-            String, str(self.get_parameter("place_target_topic").value), self._on_place_target, 10
-        )
-
-        self.create_subscription(
-            Pose2D,
-            str(self.get_parameter("fsm_pick_nav_goal_topic").value),
-            self._on_fsm_pick_nav_goal,
+            String,
+            str(self.get_parameter("pick_target_topic").value),
+            self._on_pick_target,
             10,
         )
         self.create_subscription(
-            Pose2D,
-            str(self.get_parameter("fsm_place_nav_goal_topic").value),
-            self._on_fsm_place_nav_goal,
-            10,
-        )
-
-        self.create_subscription(
-            PointStamped,
-            str(self.get_parameter("pick_target_global_topic").value),
-            self._on_pick_target_global,
+            String,
+            str(self.get_parameter("place_target_topic").value),
+            self._on_place_target,
             10,
         )
         self.create_subscription(
-            PoseStamped,
+            Pose,
+            str(self.get_parameter("pick_target_local_topic").value),
+            self._on_pick_target_local,
+            10,
+        )
+        self.create_subscription(
+            Pose,
             str(self.get_parameter("place_target_local_topic").value),
             self._on_place_target_local,
             10,
-        )
-
-        self.create_subscription(
-            Bool, str(self.get_parameter("nav_success_topic").value), self._on_nav_success, 10
         )
         self.create_subscription(
             Bool,
@@ -165,30 +143,30 @@ class StateMachineNode(Node):
             10,
         )
         self.create_subscription(
-            Bool, str(self.get_parameter("placing_done_topic").value), self._on_placing_done, 10
-        )
-        self.create_subscription(
             Bool,
-            str(self.get_parameter("placing_done_sim_topic").value),
-            self._on_placing_done_sim,
+            str(self.get_parameter("placing_done_topic").value),
+            self._on_placing_done,
             10,
+        )
+
+        # ---- Nav2 Action Client ----
+        self.nav_action_client = ActionClient(
+            self, NavigateToPose, "navigate_to_pose"
         )
 
         # ---- Timers ----
         heartbeat_period = float(self.get_parameter("heartbeat_log_s").value)
         self.create_timer(max(0.5, heartbeat_period), self._heartbeat_log)
-        self.create_timer(0.2, self._placing_done_sim_fallback_tick)
 
         # Initial publish/logs
         self._publish_state()
         self.get_logger().info(f"Started in state: {self.state.value}")
         self.get_logger().info(
-            "Waiting for /pick_target and /place_target before entering pick_navigation"
+            "Waiting for /pick_target and /place_target before entering pick_exploration"
         )
 
-    # ---------------- Callbacks ----------------
+    # ===================== Callbacks =====================
 
-    # Process pick target string from audio pipeline.
     def _on_pick_target(self, msg: String):
         self.event_counts["pick_target"] += 1
         self.get_logger().info(f"Event /pick_target: '{msg.data}'")
@@ -198,7 +176,6 @@ class StateMachineNode(Node):
         else:
             self.get_logger().warn("Received empty /pick_target; ignoring")
 
-    # Process place target string from audio pipeline.
     def _on_place_target(self, msg: String):
         self.event_counts["place_target"] += 1
         self.get_logger().info(f"Event /place_target: '{msg.data}'")
@@ -208,81 +185,46 @@ class StateMachineNode(Node):
         else:
             self.get_logger().warn("Received empty /place_target; ignoring")
 
-    # Accept canonical pick nav goal in pick_navigation.
-    def _on_fsm_pick_nav_goal(self, msg: Pose2D):
-        self.event_counts["fsm_pick_nav_goal"] += 1
-        if self.state != SMState.PICK_NAVIGATION:
+    def _on_pick_target_local(self, msg: Pose):
+        self.event_counts["pick_target_local"] += 1
+        if self.state != SMState.PICK_EXPLORATION:
             self.get_logger().warn(
-                f"Ignoring /fsm_pick_nav_goal in state={self.state.value}"
+                f"Ignoring /pick_target_local in state={self.state.value}"
             )
             return
-        self._publish_cmd_nav(msg, phase="pick", reason="received /fsm_pick_nav_goal")
 
-    # Accept canonical place nav goal in place_navigation.
-    def _on_fsm_place_nav_goal(self, msg: Pose2D):
-        self.event_counts["fsm_place_nav_goal"] += 1
-        if self.state != SMState.PLACE_NAVIGATION:
-            self.get_logger().warn(
-                f"Ignoring /fsm_place_nav_goal in state={self.state.value}"
-            )
+        map_pose = self._transform_to_map(msg)
+        if map_pose is None:
+            self.get_logger().error("Failed to transform pick target to map frame")
             return
-        self._publish_cmd_nav(msg, phase="place", reason="received /fsm_place_nav_goal")
 
-    # Convert legacy global pick target into Pose2D goal.
-    def _on_pick_target_global(self, msg: PointStamped):
-        self.event_counts["pick_target_global"] += 1
-        if self.state != SMState.PICK_NAVIGATION:
-            self.get_logger().warn(
-                f"Ignoring /pick_target_global in state={self.state.value}"
-            )
-            return
-        goal = Pose2D(x=float(msg.point.x), y=float(msg.point.y), theta=0.0)
-        self._publish_cmd_nav(goal, phase="pick", reason="converted /pick_target_global")
+        self.pick_map_pose = map_pose
+        self.get_logger().info(
+            f"Pick target in map: ({map_pose.position.x:.2f}, {map_pose.position.y:.2f})"
+        )
+        self._publish_explore_resume(False)
+        self._transition(SMState.PICK_NAVIGATION, "pick target detected and transformed")
 
-    # Convert legacy local place target into Pose2D goal.
-    def _on_place_target_local(self, msg: PoseStamped):
+    def _on_place_target_local(self, msg: Pose):
         self.event_counts["place_target_local"] += 1
-        if self.state != SMState.PLACE_NAVIGATION:
+        if self.state != SMState.PLACE_EXPLORATION:
             self.get_logger().warn(
                 f"Ignoring /place_target_local in state={self.state.value}"
             )
             return
-        goal = Pose2D(
-            x=float(msg.pose.position.x),
-            y=float(msg.pose.position.y),
-            theta=0.0,
+
+        map_pose = self._transform_to_map(msg)
+        if map_pose is None:
+            self.get_logger().error("Failed to transform place target to map frame")
+            return
+
+        self.place_map_pose = map_pose
+        self.get_logger().info(
+            f"Place target in map: ({map_pose.position.x:.2f}, {map_pose.position.y:.2f})"
         )
-        self._publish_cmd_nav(goal, phase="place", reason="converted /place_target_local")
+        self._publish_explore_resume(False)
+        self._transition(SMState.PLACE_NAVIGATION, "place target detected and transformed")
 
-    # Transition nav states when navigator reports success.
-    def _on_nav_success(self, msg: Bool):
-        self.event_counts["nav_success"] += 1
-        if not bool(msg.data):
-            self.get_logger().warn("Received /nav_success=false; staying in current state")
-            return
-
-        if self.pending_nav_phase is None:
-            self.get_logger().warn(
-                "Received /nav_success=true but no pending_nav_phase is active"
-            )
-            return
-
-        if self.pending_nav_phase == "pick" and self.state == SMState.PICK_NAVIGATION:
-            self.pending_nav_phase = None
-            self._transition(SMState.PICKING, "nav_success=true for pick phase")
-            return
-
-        if self.pending_nav_phase == "place" and self.state == SMState.PLACE_NAVIGATION:
-            self.pending_nav_phase = None
-            self._transition(SMState.PLACING, "nav_success=true for place phase")
-            return
-
-        self.get_logger().warn(
-            "Received /nav_success=true but phase/state mismatch: "
-            f"phase={self.pending_nav_phase} state={self.state.value}"
-        )
-
-    # Transition from picking after manipulator success.
     def _on_successful_pick(self, msg: Bool):
         self.event_counts["successful_pick"] += 1
         if self.state != SMState.PICKING:
@@ -292,11 +234,10 @@ class StateMachineNode(Node):
             return
 
         if bool(msg.data):
-            self._transition(SMState.PLACE_NAVIGATION, "successful_pick=true")
+            self._transition(SMState.PLACE_EXPLORATION, "successful_pick=true")
         else:
             self.get_logger().warn("successful_pick=false; staying in picking and waiting")
 
-    # Complete placing when real placing_done arrives.
     def _on_placing_done(self, msg: Bool):
         self.event_counts["placing_done"] += 1
         if self.state != SMState.PLACING:
@@ -310,102 +251,208 @@ class StateMachineNode(Node):
         else:
             self.get_logger().warn("placing_done=false; staying in placing and waiting")
 
-    # Complete placing when sim helper topic arrives.
-    def _on_placing_done_sim(self, msg: Bool):
-        self.event_counts["placing_done_sim"] += 1
-        if self.state != SMState.PLACING:
-            self.get_logger().warn(
-                f"Ignoring /placing_done_sim={msg.data} in state={self.state.value}"
-            )
+    # ===================== Nav2 Action =====================
+
+    def _send_nav_goal(self, target_pose: Pose, phase: str):
+        """Compute an offset goal and send NavigateToPose to Nav2."""
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = PoseStamped()
+        goal_msg.pose.header.frame_id = self.map_frame
+        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+
+        # Compute approach pose: offset toward robot's current position
+        robot_pose = self._get_robot_pose_in_map()
+        tx, ty = target_pose.position.x, target_pose.position.y
+
+        if robot_pose is not None:
+            rx, ry = robot_pose.position.x, robot_pose.position.y
+            dx, dy = rx - tx, ry - ty
+            dist = math.hypot(dx, dy)
+            if dist > 1e-3:
+                offset_x = tx + self.nav_offset_m * dx / dist
+                offset_y = ty + self.nav_offset_m * dy / dist
+                yaw = math.atan2(-dy, -dx)  # face the target
+            else:
+                offset_x, offset_y, yaw = tx, ty, 0.0
+        else:
+            self.get_logger().warn("Could not get robot pose; navigating directly to target")
+            offset_x, offset_y, yaw = tx, ty, 0.0
+
+        goal_msg.pose.pose.position.x = offset_x
+        goal_msg.pose.pose.position.y = offset_y
+        goal_msg.pose.pose.position.z = 0.0
+        goal_msg.pose.pose.orientation = self._yaw_to_quaternion(yaw)
+
+        self.get_logger().info(
+            f"Sending Nav2 goal for {phase}: ({offset_x:.2f}, {offset_y:.2f}, yaw={yaw:.2f})"
+        )
+
+        if not self.nav_action_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error("Nav2 action server not available!")
             return
 
-        if bool(msg.data):
-            self._transition(SMState.FINISHED, "placing_done_sim=true")
+        send_future = self.nav_action_client.send_goal_async(goal_msg)
+        send_future.add_done_callback(
+            lambda future: self._nav_goal_response_cb(future, phase)
+        )
+        self.event_counts["nav_goal_sent"] += 1
+
+    def _nav_goal_response_cb(self, future, phase: str):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().error(f"Nav2 goal rejected for {phase}")
+            return
+
+        self.nav_goal_handle = goal_handle
+        self.get_logger().info(f"Nav2 goal accepted for {phase}")
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(
+            lambda future: self._nav_result_cb(future, phase)
+        )
+
+    def _nav_result_cb(self, future, phase: str):
+        result = future.result()
+        status = result.status
+        # action_msgs/GoalStatus: STATUS_SUCCEEDED = 4
+        if status == 4:
+            self.get_logger().info(f"Nav2 succeeded for {phase}")
+            if phase == "pick" and self.state == SMState.PICK_NAVIGATION:
+                self._transition(SMState.PICKING, "nav2 succeeded for pick")
+            elif phase == "place" and self.state == SMState.PLACE_NAVIGATION:
+                self._transition(SMState.PLACING, "nav2 succeeded for place")
         else:
-            self.get_logger().warn("placing_done_sim=false; staying in placing and waiting")
+            self.get_logger().error(
+                f"Nav2 failed for {phase} with status={status}; staying in current state"
+            )
 
-    # ---------------- Helpers ----------------
+    # ===================== Helpers =====================
 
-    # Leave audio state once both text targets exist.
     def _maybe_finish_audio(self):
-        if self.state == SMState.AUDIO_PROCESSING and self.pick_target_ok and self.place_target_ok:
+        if (
+            self.state == SMState.AUDIO_PROCESSING
+            and self.pick_target_ok
+            and self.place_target_ok
+        ):
             self._transition(
-                SMState.PICK_NAVIGATION,
+                SMState.PICK_EXPLORATION,
                 "both /pick_target and /place_target received",
             )
 
-    # Publish cmd_nav and mark active nav phase.
-    def _publish_cmd_nav(self, goal: Pose2D, phase: str, reason: str):
-        out = Pose2D()
-        out.x = float(goal.x)
-        out.y = float(goal.y)
-        out.theta = float(goal.theta)
-        self.cmd_nav_pub.publish(out)
+    def _publish_explore_resume(self, resume: bool):
+        msg = Bool()
+        msg.data = resume
+        self.explore_resume_pub.publish(msg)
+        self.event_counts["explore_resume_sent"] += 1
+        self.get_logger().info(f"Published explore/resume={resume}")
 
-        self.pending_nav_phase = phase
-        self.last_cmd_nav = out
-        self.nav_goal_sent_ns = self.get_clock().now().nanoseconds
-        self.event_counts["cmd_nav_sent"] += 1
-
-        self.get_logger().info(
-            f"Published /cmd_nav phase={phase} goal=({out.x:.2f}, {out.y:.2f}, {out.theta:.2f}) "
-            f"(reason: {reason})"
-        )
-
-    # Send one-shot pick handoff request.
     def _publish_pick_request_once(self):
         self.fsm_pick_request_pub.publish(Bool(data=True))
         self.event_counts["fsm_pick_request_sent"] += 1
         self.get_logger().info("Published /fsm_pick_request=true (enter PICKING)")
 
-    # Send one-shot place handoff request.
     def _publish_place_request_once(self):
         self.fsm_place_request_pub.publish(Bool(data=True))
         self.event_counts["fsm_place_request_sent"] += 1
         self.get_logger().info("Published /fsm_place_request=true (enter PLACING)")
 
-    # Run one-shot actions on state entry.
-    def _on_state_entry(self):
-        if self.state in (SMState.PICK_NAVIGATION, SMState.PLACE_NAVIGATION):
-            self.pending_nav_phase = None
-            self.nav_goal_sent_ns = None
+    def _transform_to_map(self, local_pose: Pose) -> Optional[Pose]:
+        """Transform a Pose from camera frame to map frame using TF2."""
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                self.camera_frame,
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=1.0),
+            )
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException,
+        ) as e:
+            self.get_logger().error(f"TF2 lookup failed: {e}")
+            return None
 
-        if self.state == SMState.PICKING:
+        # Manual transform application
+        t = transform.transform.translation
+        r = transform.transform.rotation
+
+        # Convert quaternion rotation to apply to the point
+        px, py, pz = local_pose.position.x, local_pose.position.y, local_pose.position.z
+        # Rotate point by quaternion: p' = q * p * q_inv
+        rx, ry, rz, rw = r.x, r.y, r.z, r.w
+        # Using quaternion rotation formula
+        tx_out = (1 - 2 * (ry * ry + rz * rz)) * px + 2 * (rx * ry - rz * rw) * py + 2 * (rx * rz + ry * rw) * pz + t.x
+        ty_out = 2 * (rx * ry + rz * rw) * px + (1 - 2 * (rx * rx + rz * rz)) * py + 2 * (ry * rz - rx * rw) * pz + t.y
+        tz_out = 2 * (rx * rz - ry * rw) * px + 2 * (ry * rz + rx * rw) * py + (1 - 2 * (rx * rx + ry * ry)) * pz + t.z
+
+        result = Pose()
+        result.position.x = tx_out
+        result.position.y = ty_out
+        result.position.z = tz_out
+        return result
+
+    def _get_robot_pose_in_map(self) -> Optional[Pose]:
+        """Get robot's current position in map frame via TF2."""
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.map_frame,
+                "base_link",
+                rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=1.0),
+            )
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException,
+        ) as e:
+            self.get_logger().warn(f"Could not get robot pose: {e}")
+            return None
+
+        pose = Pose()
+        pose.position.x = transform.transform.translation.x
+        pose.position.y = transform.transform.translation.y
+        pose.position.z = transform.transform.translation.z
+        pose.orientation = transform.transform.rotation
+        return pose
+
+    @staticmethod
+    def _yaw_to_quaternion(yaw: float) -> Quaternion:
+        q = Quaternion()
+        q.x = 0.0
+        q.y = 0.0
+        q.z = math.sin(yaw / 2.0)
+        q.w = math.cos(yaw / 2.0)
+        return q
+
+    def _on_state_entry(self):
+        """Run one-shot actions on state entry."""
+        if self.state == SMState.PICK_EXPLORATION:
+            self._publish_explore_resume(True)
+
+        elif self.state == SMState.PICK_NAVIGATION:
+            if self.pick_map_pose is not None:
+                self._send_nav_goal(self.pick_map_pose, "pick")
+            else:
+                self.get_logger().error("No pick_map_pose set for PICK_NAVIGATION!")
+
+        elif self.state == SMState.PICKING:
             self._publish_pick_request_once()
 
-        if self.state == SMState.PLACING:
-            self._publish_place_request_once()
-            if self.enable_placing_done_sim_fallback:
-                self.placing_done_sim_deadline_ns = (
-                    self.get_clock().now().nanoseconds
-                    + int(self.placing_done_sim_delay_s * 1e9)
-                )
-                self.get_logger().warn(
-                    "Sim-only placing fallback is enabled; auto-finish timer armed "
-                    f"for {self.placing_done_sim_delay_s:.1f}s"
-                )
+        elif self.state == SMState.PLACE_EXPLORATION:
+            self._publish_explore_resume(True)
+
+        elif self.state == SMState.PLACE_NAVIGATION:
+            if self.place_map_pose is not None:
+                self._send_nav_goal(self.place_map_pose, "place")
             else:
-                self.placing_done_sim_deadline_ns = None
-        else:
-            self.placing_done_sim_deadline_ns = None
+                self.get_logger().error("No place_map_pose set for PLACE_NAVIGATION!")
 
-    # Trigger sim fallback timeout while in placing.
-    def _placing_done_sim_fallback_tick(self):
-        if not self.enable_placing_done_sim_fallback:
-            return
-        if self.state != SMState.PLACING:
-            return
-        if self.placing_done_sim_deadline_ns is None:
-            return
+        elif self.state == SMState.PLACING:
+            self._publish_place_request_once()
 
-        now_ns = self.get_clock().now().nanoseconds
-        if now_ns >= self.placing_done_sim_deadline_ns:
-            self._transition(
-                SMState.FINISHED,
-                f"placing_done_sim_fallback timeout ({self.placing_done_sim_delay_s:.1f}s)",
-            )
+        elif self.state == SMState.FINISHED:
+            self.get_logger().info(":) Mission complete! All done.")
 
-    # Apply and log state transitions.
     def _transition(self, new_state: SMState, reason: str):
         if new_state == self.state:
             return
@@ -426,46 +473,23 @@ class StateMachineNode(Node):
             f"after {dwell_s:.2f}s (reason: {reason})"
         )
 
-    # Publish current FSM state text.
     def _publish_state(self):
         out = String()
         out.data = self.state.value
         self.state_pub.publish(out)
         self.get_logger().info(f"Published state: '{self.state.value}'")
 
-    # Emit periodic heartbeat for runtime debugging.
     def _heartbeat_log(self):
         now_ns = self.get_clock().now().nanoseconds
         dwell_s = (now_ns - self.state_enter_ns) * 1e-9
 
-        nav_goal_age_s = (
-            -1.0
-            if self.nav_goal_sent_ns is None
-            else (now_ns - self.nav_goal_sent_ns) * 1e-9
-        )
-        nav_goal_desc = (
-            "none"
-            if self.last_cmd_nav is None
-            else f"({self.last_cmd_nav.x:.2f}, {self.last_cmd_nav.y:.2f}, {self.last_cmd_nav.theta:.2f})"
-        )
-
-        fallback_remaining_s = None
-        if self.placing_done_sim_deadline_ns is not None:
-            fallback_remaining_s = max(
-                0.0, (self.placing_done_sim_deadline_ns - now_ns) * 1e-9
-            )
-
         self.get_logger().info(
             f"[heartbeat] state={self.state.value} dwell={dwell_s:.1f}s "
             f"pick_ok={self.pick_target_ok} place_ok={self.place_target_ok} "
-            f"pending_nav_phase={self.pending_nav_phase} nav_goal={nav_goal_desc} "
-            f"nav_goal_age_s={nav_goal_age_s:.1f} fallback_enabled={self.enable_placing_done_sim_fallback} "
-            f"fallback_remaining_s={fallback_remaining_s} events={self.event_counts} "
-            f"last_reason='{self.last_transition_reason}'"
+            f"events={self.event_counts} last_reason='{self.last_transition_reason}'"
         )
 
 
-# Start and spin state machine node.
 def main():
     rclpy.init()
     node = StateMachineNode()
