@@ -76,6 +76,8 @@ class StateMachineNode(Node):
         self.nav_offset_m = float(self.get_parameter("nav_offset_m").value)
         self.camera_frame = str(self.get_parameter("camera_frame").value)
         self.map_frame = str(self.get_parameter("map_frame").value)
+        self.pick_attempt = 0
+        self.max_pick_attempts = 3
 
         self.transition_count = 0
         self.last_transition_reason = "startup"
@@ -248,9 +250,21 @@ class StateMachineNode(Node):
             return
 
         if bool(msg.data):
+            self.pick_attempt = 0
             self._transition(SMState.PLACE_EXPLORATION, "successful_pick=true")
         else:
-            self.get_logger().warn("successful_pick=false; staying in picking and waiting")
+            self.pick_attempt += 1
+            if self.pick_attempt < self.max_pick_attempts:
+                self.get_logger().warn(
+                    f"Pick failed (attempt {self.pick_attempt}/{self.max_pick_attempts}), retrying..."
+                )
+                self._publish_pick_request_once()
+            else:
+                self.get_logger().error(
+                    f"Pick failed after {self.max_pick_attempts} attempts, giving up"
+                )
+                self.pick_attempt = 0
+                self._transition(SMState.FINISHED, "pick failed after max retries")
 
     def _on_placing_done(self, msg: Bool):
         self.event_counts["placing_done"] += 1
