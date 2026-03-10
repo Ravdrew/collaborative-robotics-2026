@@ -107,6 +107,8 @@ class GraspNode(Node):
         self.declare_parameter('grasp_finger_threshold', 0.033)
         self.declare_parameter('eef_arrival_threshold', 0.05)
         self.declare_parameter('camera_pan_time', 1.5)
+        self.declare_parameter('eef_stall_timeout', 5.0)
+        self.declare_parameter('eef_stall_threshold', 0.005)
         # Neutral/retract pose in base_link (safe overhead position)
         self.declare_parameter('neutral_x',  -0.15)
         self.declare_parameter('neutral_y', -0.40)
@@ -121,6 +123,10 @@ class GraspNode(Node):
         self.grasp_finger_threshold = self.get_parameter('grasp_finger_threshold').get_parameter_value().double_value
         self.eef_arrival_threshold  = self.get_parameter('eef_arrival_threshold').get_parameter_value().double_value
         self.camera_pan_time        = self.get_parameter('camera_pan_time').get_parameter_value().double_value
+        self.eef_stall_timeout      = self.get_parameter('eef_stall_timeout').get_parameter_value().double_value
+        self.eef_stall_threshold    = self.get_parameter('eef_stall_threshold').get_parameter_value().double_value
+        self._last_eef_dist = None
+        self._last_eef_move_time = None
 
         neutral = Pose()
         neutral.position.x    = self.get_parameter('neutral_x').get_parameter_value().double_value
@@ -407,13 +413,37 @@ class GraspNode(Node):
                     self.get_logger().info(
                         f'EEF arrived at target (dist={dist:.4f} m). '
                         f'Action: {self.action}.')
+                    self._last_eef_dist = None
+                    self._last_eef_move_time = None
                     next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
                     self._transition(next_state)
                     return
 
+                # Stall detection: if EEF hasn't moved significantly, close and raise
+                now = self.get_clock().now().nanoseconds * 1e-9
+                if self._last_eef_dist is not None:
+                    moved = abs(dist - self._last_eef_dist)
+                    if moved > self.eef_stall_threshold:
+                        self._last_eef_move_time = now
+                    elif self._last_eef_move_time is not None and (now - self._last_eef_move_time) > self.eef_stall_timeout:
+                        self.get_logger().warn(
+                            f'EEF stalled for {self.eef_stall_timeout:.1f}s '
+                            f'(dist={dist:.4f} m). Closing gripper and raising.')
+                        self._last_eef_dist = None
+                        self._last_eef_move_time = None
+                        next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
+                        self._transition(next_state)
+                        return
+                else:
+                    self._last_eef_move_time = now
+                self._last_eef_dist = dist
+
             if self._elapsed() > 20.0:
-                self.get_logger().error('Timed out waiting for EEF to arrive.')
-                self._transition(State.FAILED)
+                self.get_logger().warn('Timed out waiting for EEF — closing gripper and raising.')
+                self._last_eef_dist = None
+                self._last_eef_move_time = None
+                next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
+                self._transition(next_state)
 
         # ── CLOSE_GRIPPER (pick) ─────────────────────────────────────────
         elif self._state == State.CLOSE_GRIPPER:
