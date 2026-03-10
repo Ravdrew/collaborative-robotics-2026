@@ -23,7 +23,7 @@ Hardware Setup (Dual U2D2):
 Usage:
 #ros2 topic pub /state_machine --once std_msgs/msg/String "{data: 'audio_processing'}"
 
-    ros2 launch tidybot_bringup real.launch.py use_lidar:=true use_rviz:=false | grep -E "explore|our_state_machine|audio_proc"
+    ros2 launch tidybot_bringup real.launch.py use_lidar:=true use_rviz:=false | grep -E "explore|our_state_machine|audio_proc|fruit"
     ros2 launch tidybot_bringup real.launch.py
     ros2 launch tidybot_bringup real.launch.py use_rviz:=false
     ros2 launch tidybot_bringup real.launch.py sensor_mode:=top_camera

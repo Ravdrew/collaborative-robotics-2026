@@ -110,8 +110,8 @@ class GraspNode(Node):
         self.declare_parameter('eef_stall_timeout', 5.0)
         self.declare_parameter('eef_stall_threshold', 0.005)
         # Neutral/retract pose in base_link (safe overhead position)
-        self.declare_parameter('neutral_x',  -0.15)
-        self.declare_parameter('neutral_y', -0.40)
+        self.declare_parameter('neutral_x',  0.40)
+        self.declare_parameter('neutral_y', 0.15)
         self.declare_parameter('neutral_z',  0.40)
         self.declare_parameter('neutral_qw', _FINGERS_DOWN_HORIZONTAL[0])
         self.declare_parameter('neutral_qx', _FINGERS_DOWN_HORIZONTAL[1])
@@ -304,7 +304,7 @@ class GraspNode(Node):
         Euclidean distance to self._eef_pose in base_link.
         Returns None if the TF lookup fails.
         """
-        ee_frame = f'{self.arm_name}_ee_arm_link'
+        ee_frame = f'{self.arm_name}_pinch_site'
         try:
             tf = self._tf_buffer.lookup_transform(
                 'base_link', ee_frame, rclpy.time.Time())
