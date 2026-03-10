@@ -242,7 +242,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 5.0
-        inflation_radius: 0.35
+        inflation_radius: 0.25
       always_send_full_costmap: true
 
 global_costmap:
@@ -294,7 +294,7 @@ global_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 5.0
-        inflation_radius: 0.35
+        inflation_radius: 0.25
       always_send_full_costmap: true
 
 waypoint_follower:
