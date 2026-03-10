@@ -176,10 +176,14 @@ behavior_server:
     behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
     spin:
       plugin: "nav2_behaviors/Spin"
+      max_rotational_vel: 0.15
+      min_rotational_vel: 0.05
     backup:
       plugin: "nav2_behaviors/BackUp"
+      speed_limit: 0.05
     drive_on_heading:
       plugin: "nav2_behaviors/DriveOnHeading"
+      speed_limit: 0.05
     wait:
       plugin: "nav2_behaviors/Wait"
 
