@@ -66,7 +66,7 @@ class FruitTargetNode(Node):
         self.model = YOLO("yolov8n.pt")
 
         # COCO class names we want
-        self.target_pick_classes = {"banana", "apple"}
+        self.target_pick_classes = {"banana"}
         self.target_place_classes = {"bowl"}
 
         # Subscribe to camera intrinsics

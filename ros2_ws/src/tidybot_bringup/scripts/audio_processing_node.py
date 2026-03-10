@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 # ---------- Gemini structured output schema ----------
 class LLMParse(BaseModel):
-    pick_target: str = Field(description="The object/fruit to pick up (e.g., 'apple', 'banana', 'water bottle').")
+    pick_target: Literal["banana"] = Field(description="The object to pick up. Must be 'banana'.")
     place_target: Literal["none", "bowl", "hand"] = Field(
         description="Where to place it: none, bowl, or hand."
     )
@@ -32,7 +32,7 @@ class LLMParse(BaseModel):
 SYSTEM_INSTRUCTION = """You are a robot instruction parser.
 
 Given a speech transcription, extract:
-- pick_target: the item/fruit/object the user wants the robot to pick up
+- pick_target: must always be "banana"
 - place_target: where to put it, must be exactly one of: "none", "bowl", "hand"
 
 Rules:
