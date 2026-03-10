@@ -69,6 +69,7 @@ class StateMachineNode(Node):
         self.state: SMState = SMState.AUDIO_PROCESSING
         self.pick_target_ok = False
         self.place_target_ok = False
+        self.place_target_value = ""
         self.pick_map_pose: Optional[Pose] = None
         self.place_map_pose: Optional[Pose] = None
         self.nav_goal_handle = None
@@ -196,6 +197,7 @@ class StateMachineNode(Node):
         self.event_counts["place_target"] += 1
         self.get_logger().info(f"Event /place_target: '{msg.data}'")
         if msg.data.strip():
+            self.place_target_value = msg.data.strip().lower()
             self.place_target_ok = True
             self._maybe_finish_audio()
         else:
@@ -251,7 +253,10 @@ class StateMachineNode(Node):
 
         if bool(msg.data):
             self.pick_attempt = 0
-            self._transition(SMState.PLACE_EXPLORATION, "successful_pick=true")
+            if self.place_target_value == "none":
+                self._transition(SMState.FINISHED, "successful_pick=true, no place target")
+            else:
+                self._transition(SMState.PLACE_EXPLORATION, "successful_pick=true")
         else:
             self.pick_attempt += 1
             if self.pick_attempt < self.max_pick_attempts:
