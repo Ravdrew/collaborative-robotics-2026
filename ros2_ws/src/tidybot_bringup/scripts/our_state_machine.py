@@ -159,11 +159,11 @@ class StateMachineNode(Node):
         self.create_timer(max(0.5, heartbeat_period), self._heartbeat_log)
 
         # Initial publish/logs
-        self._publish_state()
-        self.get_logger().info(f"Started in state: {self.state.value}")
-        self.get_logger().info(
-            "Waiting for /pick_target and /place_target before entering pick_exploration"
-        )
+        # self._publish_state()
+        # self.get_logger().info(f"Started in state: {self.state.value}")
+        # self.get_logger().info(
+        #     "Waiting for /pick_target and /place_target before entering pick_exploration"
+        # )
 
     # ===================== Callbacks =====================
 

@@ -21,6 +21,7 @@ Hardware Setup (Dual U2D2):
     - U2D2 #2 (/dev/ttyUSB_LEFT): Left arm (IDs 11-19)
 
 Usage:
+    ros2 launch tidybot_bringup real.launch.py use_lidar:=true use_top_camera:=true | grep -E "explore|our_state_machine|audio_proc"
     ros2 launch tidybot_bringup real.launch.py
     ros2 launch tidybot_bringup real.launch.py use_rviz:=false
     ros2 launch tidybot_bringup real.launch.py sensor_mode:=top_camera
@@ -558,7 +559,7 @@ def launch_setup(context, *args, **kwargs):
     # State machine node (delayed 5s to let other nodes start first)
     if use_state_machine:
         nodes.append(TimerAction(
-            period=8.0,
+            period=3.0,
             actions=[Node(
                 package='tidybot_bringup',
                 executable='our_state_machine.py',
@@ -610,7 +611,7 @@ def generate_launch_description():
             description='Serial number for top RealSense camera (used when sensor_mode:=top_camera)'
         ),
         DeclareLaunchArgument(
-            'use_top_camera', default_value='true',
+            'use_top_camera', default_value='false',
             description='Top camera enable flag for top_camera mode only; ignored when sensor_mode:=lidar'
         ),
         DeclareLaunchArgument(

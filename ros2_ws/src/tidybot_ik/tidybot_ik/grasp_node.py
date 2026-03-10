@@ -540,6 +540,7 @@ def main(args=None):
     node = GraspNode()
 
     try:
+        node._send_pan_tilt(0.0, 0.3)
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
