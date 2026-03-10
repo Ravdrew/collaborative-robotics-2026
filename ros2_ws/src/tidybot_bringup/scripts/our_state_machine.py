@@ -349,9 +349,13 @@ class StateMachineNode(Node):
             elif phase == "place" and self.state == SMState.PLACE_NAVIGATION:
                 self._transition(SMState.PLACING, "nav2 succeeded for place")
         else:
-            self.get_logger().error(
-                f"Nav2 failed for {phase} with status={status}; staying in current state"
+            self.get_logger().warn(
+                f"Nav2 failed for {phase} with status={status}; retrying..."
             )
+            if phase == "pick" and self.state == SMState.PICK_NAVIGATION and self.pick_map_pose is not None:
+                self._send_nav_goal(self.pick_map_pose, "pick")
+            elif phase == "place" and self.state == SMState.PLACE_NAVIGATION and self.place_map_pose is not None:
+                self._send_nav_goal(self.place_map_pose, "place")
 
     # ===================== Helpers =====================
 
