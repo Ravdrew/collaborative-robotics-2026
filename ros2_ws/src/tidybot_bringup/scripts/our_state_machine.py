@@ -158,12 +158,26 @@ class StateMachineNode(Node):
         heartbeat_period = float(self.get_parameter("heartbeat_log_s").value)
         self.create_timer(max(0.5, heartbeat_period), self._heartbeat_log)
 
+        # Keep stopping exploration until we actually need it (explore_lite
+        # starts navigating immediately on launch, so we suppress it)
+        self._explore_suppress_timer = self.create_timer(
+            1.0, self._suppress_exploration
+        )
+
         # Initial publish/logs
         # self._publish_state()
         # self.get_logger().info(f"Started in state: {self.state.value}")
         # self.get_logger().info(
         #     "Waiting for /pick_target and /place_target before entering pick_exploration"
         # )
+
+    def _suppress_exploration(self):
+        """Repeatedly publish stop until we enter an exploration state."""
+        if self.state in (SMState.PICK_EXPLORATION, SMState.PLACE_EXPLORATION):
+            # We want exploration now — stop suppressing
+            self._explore_suppress_timer.cancel()
+            return
+        self.explore_resume_pub.publish(Bool(data=False))
 
     # ===================== Callbacks =====================
 
