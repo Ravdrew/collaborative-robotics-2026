@@ -254,8 +254,8 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_footprint
       rolling_window: true
-      width: 20
-      height: 20
+      width: 10
+      height: 10
       robot_radius: 0.30
       footprint: "[[0.25, 0.22], [0.25, -0.22], [-0.25, -0.22], [-0.25, 0.22]]"
       resolution: 0.05
