@@ -98,6 +98,7 @@ class CameraCoverageExplorer(Node):
         # Publishers
         self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel", 10)
         self.grid_pub = self.create_publisher(OccupancyGrid, "camera_coverage_grid", 10)
+        self.detection_enabled_pub = self.create_publisher(Bool, "/detection_enabled", 10)
 
         # Subscribers
         self.create_subscription(Bool, "explore/resume", self._on_explore_resume, 10)
@@ -217,6 +218,7 @@ class CameraCoverageExplorer(Node):
         if msg.data:
             if self.state == State.IDLE:
                 self.get_logger().info("Starting camera coverage exploration")
+                self._publish_detection_enabled(False)
                 self._start_rotation()
         else:
             if self.state != State.IDLE:
@@ -224,6 +226,7 @@ class CameraCoverageExplorer(Node):
                 self._cancel_nav_if_active()
                 self._stop_base()
                 self.state = State.IDLE
+                self._publish_detection_enabled(True)
 
     def _get_robot_pose(self):
         """Returns (x, y, yaw) in map frame, or None if TF unavailable."""
@@ -357,6 +360,7 @@ class CameraCoverageExplorer(Node):
                 # Enter dwell
                 self.state = State.DWELL
                 self.dwell_start_time = self.get_clock().now()
+                self._publish_detection_enabled(True)
                 self.get_logger().info(
                     f"Dwelling at step {self.current_rotation_step + 1}/{self.rotation_steps}"
                 )
@@ -368,6 +372,7 @@ class CameraCoverageExplorer(Node):
         elif self.state == State.DWELL:
             elapsed = (self.get_clock().now() - self.dwell_start_time).nanoseconds / 1e9
             if elapsed >= self.dwell_time:
+                self._publish_detection_enabled(False)
                 self.current_rotation_step += 1
                 if self.current_rotation_step >= self.rotation_steps:
                     # Full rotation done, select next viewpoint
@@ -505,6 +510,11 @@ class CameraCoverageExplorer(Node):
             self.get_logger().warn(f"Navigation failed (status={status}), trying next candidate")
             if self.state == State.NAVIGATING:
                 self._try_next_candidate()
+
+    def _publish_detection_enabled(self, enabled: bool):
+        msg = Bool()
+        msg.data = enabled
+        self.detection_enabled_pub.publish(msg)
 
     def _cancel_nav_if_active(self):
         if self.nav_goal_handle is not None:
