@@ -130,7 +130,6 @@ def launch_setup(context, *args, **kwargs):
         launch_arguments={
             'use_sim_time': use_sim_time,
             'params_file': os.path.join(pkg_dir, 'config', 'nav2_params.yaml'),
-            'default_bt_xml_filename': os.path.join(pkg_dir, 'config', 'navigate_to_pose.xml'),
         }.items(),
     )
 
