@@ -105,7 +105,8 @@ class GripperController:
             cmd.name = 'left_gripper'
             self.left_pub.publish(cmd)
 
-    def set_position(self, side: str, position: float, duration: float = 2.0):
+    def set_position(self, side: str, position: float, duration: float = 2.0,
+                     stop_after: bool = True):
         """
         Set gripper to a specific position.
 
@@ -113,6 +114,8 @@ class GripperController:
             side: 'right' or 'left'
             position: 0.0 (fully open) to 1.0 (fully closed)
             duration: Time to publish the command (seconds)
+            stop_after: If True (default), send PWM=0 after the command completes
+                        (SDK mode only). Set to False to maintain grip force.
         """
         position = max(0.0, min(1.0, position))
 
@@ -132,8 +135,8 @@ class GripperController:
                 rclpy.spin_once(self.node, timeout_sec=0.01)
                 time.sleep(0.05)
 
-            # Stop gripper
-            self._publish_sdk(side, 0.0)
+            if stop_after:
+                self._publish_sdk(side, 0.0)
 
     def open(self, side: str, duration: float = 2.0):
         """
@@ -145,15 +148,17 @@ class GripperController:
         """
         self.set_position(side, 0.0, duration)
 
-    def close(self, side: str, duration: float = 2.0):
+    def close(self, side: str, duration: float = 2.0, stop_after: bool = True):
         """
         Close the gripper.
 
         Args:
             side: 'right' or 'left'
             duration: Time to publish the command (seconds)
+            stop_after: If True (default), send PWM=0 after closing (SDK mode only).
+                        Set to False to maintain grip force after closing.
         """
-        self.set_position(side, 1.0, duration)
+        self.set_position(side, 1.0, duration, stop_after=stop_after)
 
     def open_both(self, duration: float = 2.0):
         """Open both grippers simultaneously."""

@@ -15,6 +15,7 @@
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
   <depend>tidybot_msgs</depend>
+  <depend>tidybot_control</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_geometry_msgs</depend>
 

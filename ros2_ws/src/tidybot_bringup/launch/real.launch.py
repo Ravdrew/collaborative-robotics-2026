@@ -413,6 +413,9 @@ def launch_setup(context, *args, **kwargs):
             executable='grasp_node',
             name='grasp_node',
             output='screen',
+            parameters=[{
+                'gripper_mode': 'real',
+            }],
         ))
 
     # Fruit detection node (YOLO apple/banana detection -> /pick_target_local)

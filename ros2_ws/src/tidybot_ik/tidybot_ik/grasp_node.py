@@ -58,6 +58,7 @@ from std_msgs.msg import Float64MultiArray, Bool
 import tf2_ros
 
 from tidybot_msgs.srv import PlanToTarget
+from tidybot_control.gripper_controller import GripperController
 
 
 # ---------------------------------------------------------------------------
@@ -67,9 +68,7 @@ from tidybot_msgs.srv import PlanToTarget
 _FINGERS_DOWN_HORIZONTAL = (0.5, 0.5, 0.5, -0.5)  # (qw, qx, qy, qz)
 _FINGERS_DOWN_VERTICAL = (0, 0.707107, 0, 0.707107)   # (qw, qx, qy, qz)
 
-# Gripper positions (0.0 = open, 1.0 = closed — matches test_arms_sim.py)
-_GRIPPER_OPEN   = 0.0
-_GRIPPER_CLOSED = 0.9
+_GRIPPER_CLOSE_SETTLE_TIME = 1.0
 
 _CAMERA_PAN = 0.6
 _CAMERA_NEUTRAL = 0.3
@@ -109,6 +108,8 @@ class GraspNode(Node):
         self.declare_parameter('camera_pan_time', 1.5)
         self.declare_parameter('eef_stall_timeout', 5.0)
         self.declare_parameter('eef_stall_threshold', 0.005)
+        self.declare_parameter('gripper_mode', 'sim')
+        self.declare_parameter('gripper_pressure', 1.0)
         # Neutral/retract pose in base_link (safe overhead position)
         self.declare_parameter('neutral_x',  0.40)
         self.declare_parameter('neutral_y', 0.15)
@@ -127,6 +128,11 @@ class GraspNode(Node):
         self.eef_stall_threshold    = self.get_parameter('eef_stall_threshold').get_parameter_value().double_value
         self._last_eef_dist = None
         self._last_eef_move_time = None
+
+        gripper_mode = self.get_parameter('gripper_mode').get_parameter_value().string_value
+        gripper_pressure = self.get_parameter('gripper_pressure').get_parameter_value().double_value
+        self._gripper = GripperController(self, mode=gripper_mode, pressure=gripper_pressure)
+        self._gripper_mode = gripper_mode
 
         neutral = Pose()
         neutral.position.x    = self.get_parameter('neutral_x').get_parameter_value().double_value
@@ -148,8 +154,6 @@ class GraspNode(Node):
         # Publishers
         # ------------------------------------------------------------------
         self._object_pose_pub   = self.create_publisher(Pose, '/object_pose_in_camera', 10)
-        self._right_gripper_pub = self.create_publisher(Float64MultiArray, '/right_gripper/cmd', 10)
-        self._left_gripper_pub  = self.create_publisher(Float64MultiArray, '/left_gripper/cmd', 10)
         self._pick_result_pub   = self.create_publisher(Bool, '/successful_pick', 10)
         self._place_result_pub  = self.create_publisher(Bool, '/placing_done', 10)
         self._pan_tilt_pub      = self.create_publisher(Float64MultiArray, '/camera/pan_tilt_cmd', 10)
@@ -195,6 +199,7 @@ class GraspNode(Node):
         self.get_logger().info('=' * 50)
         self.get_logger().info('Grasp Node')
         self.get_logger().info('=' * 50)
+        self.get_logger().info(f'  Gripper mode           : {self._gripper_mode}')
         self.get_logger().info(f'  Gripper close time     : {self.gripper_toggle_time:.1f} s')
         self.get_logger().info(f'  EEF arrival threshold  : {self.eef_arrival_threshold:.3f} m')
         self.get_logger().info(f'  Finger grasp threshold : {self.grasp_finger_threshold:.4f} m  '
@@ -272,14 +277,6 @@ class GraspNode(Node):
         if self._state_start_time is None:
             return 0.0
         return time.time() - self._state_start_time
-
-    def _send_gripper(self, position: float) -> None:
-        msg = Float64MultiArray()
-        msg.data = [position]
-        if self.arm_name == 'left':
-            self._left_gripper_pub.publish(msg)
-        else:
-            self._right_gripper_pub.publish(msg)
 
     def _call_plan_to_target(self, pose: Pose,
                               use_orientation: bool = True,
@@ -428,24 +425,20 @@ class GraspNode(Node):
 
         # ── CLOSE_GRIPPER (pick) ─────────────────────────────────────────
         elif self._state == State.CLOSE_GRIPPER:
-            elapsed = self._elapsed()
-            if elapsed < 0.1:
-                self.get_logger().info('Closing gripper ...')
-            if elapsed > 1.0:
-                self._send_gripper(_GRIPPER_CLOSED)
-            if elapsed > self.gripper_toggle_time:
-                self.get_logger().info('Gripper closed.')
-                self._transition(State.PLAN_NEUTRAL)
+            if self._elapsed() < _GRIPPER_CLOSE_SETTLE_TIME:
+                return
+            self.get_logger().info('Closing gripper ...')
+            self._gripper.close(self.arm_name, duration=self.gripper_toggle_time,
+                                stop_after=False)
+            self.get_logger().info('Gripper closed.')
+            self._transition(State.PLAN_NEUTRAL)
 
         # ── OPEN_GRIPPER (place) ─────────────────────────────────────────
         elif self._state == State.OPEN_GRIPPER:
-            elapsed = self._elapsed()
-            if elapsed < 0.1:
-                self.get_logger().info('Opening gripper ...')
-            self._send_gripper(_GRIPPER_OPEN)
-            if elapsed > self.gripper_toggle_time:
-                self.get_logger().info('Gripper opened.')
-                self._transition(State.PLAN_NEUTRAL)
+            self.get_logger().info('Opening gripper ...')
+            self._gripper.open(self.arm_name, duration=self.gripper_toggle_time)
+            self.get_logger().info('Gripper opened.')
+            self._transition(State.PLAN_NEUTRAL)
 
         # ── PLAN_NEUTRAL (single entry tick) ─────────────────────────────
         elif self._state == State.PLAN_NEUTRAL:
@@ -536,7 +529,8 @@ class GraspNode(Node):
         # ── FAILED ───────────────────────────────────────────────────────
         elif self._state == State.FAILED:
             if self._elapsed() < 0.1:
-                self._send_gripper(_GRIPPER_OPEN)
+                if self.arm_name:
+                    self._gripper.open(self.arm_name, duration=1.0)
                 result_msg = Bool()
                 result_msg.data = False
                 if self.action == 'pick':
