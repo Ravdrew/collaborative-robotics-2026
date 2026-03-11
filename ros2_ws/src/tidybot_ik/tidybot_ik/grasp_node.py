@@ -375,7 +375,7 @@ class GraspNode(Node):
                 f'{self._eef_pose.position.y:.3f}, '
                 f'{self._eef_pose.position.z:.3f})')
             if not self.arm_name:
-                self.arm_name = 'left' if self._eef_pose.position.x > 0 else 'right'
+                self.arm_name = 'right'
             self._plan_accepted = False
             self._call_plan_to_target(self._eef_pose, use_orientation=True, duration=2.0)
             self._transition(State.WAIT_PLAN_GRASP)

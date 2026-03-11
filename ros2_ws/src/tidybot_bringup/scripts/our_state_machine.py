@@ -165,6 +165,9 @@ class StateMachineNode(Node):
             1.0, self._suppress_exploration
         )
 
+        # Periodic state log
+        self.create_timer(5.0, self._log_state)
+
         # Initial publish/logs
         # self._publish_state()
         # self.get_logger().info(f"Started in state: {self.state.value}")
@@ -173,10 +176,8 @@ class StateMachineNode(Node):
         # )
 
     def _suppress_exploration(self):
-        """Repeatedly publish stop until we enter an exploration state."""
+        """Repeatedly publish stop unless we are in an exploration state."""
         if self.state in (SMState.PICK_EXPLORATION, SMState.PLACE_EXPLORATION):
-            # We want exploration now — stop suppressing
-            self._explore_suppress_timer.cancel()
             return
         self.explore_resume_pub.publish(Bool(data=False))
 
@@ -204,9 +205,6 @@ class StateMachineNode(Node):
     def _on_pick_target_local(self, msg: Pose):
         self.event_counts["pick_target_local"] += 1
         if self.state != SMState.PICK_EXPLORATION:
-            self.get_logger().warn(
-                f"Ignoring /pick_target_local in state={self.state.value}"
-            )
             return
 
         map_pose = self._transform_to_map(msg)
@@ -224,9 +222,6 @@ class StateMachineNode(Node):
     def _on_place_target_local(self, msg: Pose):
         self.event_counts["place_target_local"] += 1
         if self.state != SMState.PLACE_EXPLORATION:
-            self.get_logger().warn(
-                f"Ignoring /place_target_local in state={self.state.value}"
-            )
             return
 
         map_pose = self._transform_to_map(msg)
@@ -513,6 +508,10 @@ class StateMachineNode(Node):
         out.data = self.state.value
         self.state_pub.publish(out)
         self.get_logger().info(f"Published state: '{self.state.value}'")
+
+    def _log_state(self):
+        dwell_s = (self.get_clock().now().nanoseconds - self.state_enter_ns) * 1e-9
+        self.get_logger().info(f"[state] {self.state.value} (for {dwell_s:.1f}s)")
 
 
 
