@@ -51,7 +51,6 @@ class StateMachineNode(Node):
 
         # ---- Parameters ----
         self.declare_parameter("state_topic", "/state_machine")
-        self.declare_parameter("heartbeat_log_s", 2.0)
         self.declare_parameter("pick_target_topic", "/pick_target")
         self.declare_parameter("place_target_topic", "/place_target")
         self.declare_parameter("pick_target_local_topic", "/pick_target_local")
@@ -158,8 +157,7 @@ class StateMachineNode(Node):
         )
 
         # ---- Timers ----
-        heartbeat_period = float(self.get_parameter("heartbeat_log_s").value)
-        self.create_timer(max(0.5, heartbeat_period), self._heartbeat_log)
+        self.create_timer(5.0, self._periodic_state_publish)
 
         # Keep stopping exploration until we actually need it (explore_lite
         # starts navigating immediately on launch, so we suppress it)
@@ -516,15 +514,8 @@ class StateMachineNode(Node):
         self.state_pub.publish(out)
         self.get_logger().info(f"Published state: '{self.state.value}'")
 
-    def _heartbeat_log(self):
-        now_ns = self.get_clock().now().nanoseconds
-        dwell_s = (now_ns - self.state_enter_ns) * 1e-9
-
-        self.get_logger().info(
-            f"[heartbeat] state={self.state.value} dwell={dwell_s:.1f}s "
-            f"pick_ok={self.pick_target_ok} place_ok={self.place_target_ok} "
-            f"events={self.event_counts} last_reason='{self.last_transition_reason}'"
-        )
+    def _periodic_state_publish(self):
+        self._publish_state()
 
 
 def main():
