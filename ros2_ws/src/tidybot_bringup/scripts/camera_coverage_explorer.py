@@ -10,7 +10,6 @@ States: IDLE → ROTATING → DWELL → SELECTING_VIEWPOINT → NAVIGATING → R
 
 Subscribes:
     explore/resume (Bool) — True to start exploring, False to stop
-    map (OccupancyGrid) — SLAM occupancy map for occlusion-aware raycasting
 
 Publishes:
     camera_coverage_grid (OccupancyGrid) — visualization of seen/unseen cells
@@ -52,13 +51,12 @@ class CameraCoverageExplorer(Node):
         self.declare_parameter("grid_size", 4.0)
         self.declare_parameter("camera_hfov_deg", 69.0)
         self.declare_parameter("camera_max_range", 2.5)
-        self.declare_parameter("rotation_steps", 12)
-        self.declare_parameter("rotation_speed", 0.15)
-        self.declare_parameter("dwell_time", 1.0)
+        self.declare_parameter("rotation_steps", 6)
+        self.declare_parameter("rotation_speed", 0.3)
+        self.declare_parameter("dwell_time", 1.5)
         self.declare_parameter("viewpoint_spacing", 0.5)
         self.declare_parameter("map_frame", "map")
-        self.declare_parameter("base_frame", "base_footprint")
-        self.declare_parameter("obstacle_threshold", 50)
+        self.declare_parameter("base_frame", "base_link")
 
         self.grid_resolution = self.get_parameter("grid_resolution").value
         self.grid_size = self.get_parameter("grid_size").value
@@ -70,7 +68,6 @@ class CameraCoverageExplorer(Node):
         self.viewpoint_spacing = self.get_parameter("viewpoint_spacing").value
         self.map_frame = self.get_parameter("map_frame").value
         self.base_frame = self.get_parameter("base_frame").value
-        self.obstacle_threshold = self.get_parameter("obstacle_threshold").value
 
         # Coverage grid: 0 = unseen, 1 = seen
         self.grid_cells = int(self.grid_size / self.grid_resolution)
@@ -78,11 +75,6 @@ class CameraCoverageExplorer(Node):
         # Grid origin: centered on map origin
         self.grid_origin_x = -self.grid_size / 2.0
         self.grid_origin_y = -self.grid_size / 2.0
-
-        # SLAM occupancy map (updated via subscription)
-        self.slam_map = None  # Will hold the latest OccupancyGrid
-        self.slam_map_data = None  # numpy array of occupancy values
-        self.slam_map_info = None  # MapMetaData
 
         # State
         self.state = State.IDLE
@@ -101,9 +93,6 @@ class CameraCoverageExplorer(Node):
 
         # Subscribers
         self.create_subscription(Bool, "explore/resume", self._on_explore_resume, 10)
-        self.create_subscription(
-            OccupancyGrid, "map", self._on_slam_map, 10
-        )
 
         # Nav2 action client
         self.nav_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
@@ -119,99 +108,6 @@ class CameraCoverageExplorer(Node):
             f"Camera coverage explorer ready: {self.grid_cells}x{self.grid_cells} grid, "
             f"{self.rotation_steps} rotation steps"
         )
-
-    # ------------------------------------------------------------------
-    # SLAM map handling
-    # ------------------------------------------------------------------
-
-    def _on_slam_map(self, msg: OccupancyGrid):
-        """Cache the latest SLAM occupancy map for raycasting."""
-        self.slam_map_info = msg.info
-        self.slam_map_data = np.array(msg.data, dtype=np.int8).reshape(
-            (msg.info.height, msg.info.width)
-        )
-
-    def _is_obstacle_in_slam(self, wx, wy):
-        """Check if a world coordinate is occupied in the SLAM map.
-
-        Returns True if the cell is occupied (value >= obstacle_threshold),
-        False if free or unknown, and False if the SLAM map isn't available yet
-        (so the node still works without a map, just without occlusion).
-        """
-        if self.slam_map_data is None or self.slam_map_info is None:
-            return False
-
-        info = self.slam_map_info
-        # Convert world coords to SLAM grid indices
-        mx = int((wx - info.origin.position.x) / info.resolution)
-        my = int((wy - info.origin.position.y) / info.resolution)
-
-        if mx < 0 or mx >= info.width or my < 0 or my >= info.height:
-            return False  # Outside map bounds — treat as free
-
-        val = self.slam_map_data[my, mx]
-        # OccupancyGrid: -1 = unknown, 0 = free, 100 = occupied
-        return val >= self.obstacle_threshold
-
-    # ------------------------------------------------------------------
-    # Raycasting
-    # ------------------------------------------------------------------
-
-    def _raycast_clear(self, robot_x, robot_y, target_x, target_y):
-        """Check line-of-sight from robot to target using Bresenham's line
-        on the SLAM occupancy grid.
-
-        Returns True if the path is clear (no obstacles between robot and
-        target). Returns True unconditionally if no SLAM map is available.
-        """
-        if self.slam_map_data is None or self.slam_map_info is None:
-            return True
-
-        info = self.slam_map_info
-        res = info.resolution
-        ox = info.origin.position.x
-        oy = info.origin.position.y
-
-        # Convert to SLAM grid coords
-        x0 = int((robot_x - ox) / res)
-        y0 = int((robot_y - oy) / res)
-        x1 = int((target_x - ox) / res)
-        y1 = int((target_y - oy) / res)
-
-        # Bresenham's line algorithm
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        sx = 1 if x0 < x1 else -1
-        sy = 1 if y0 < y1 else -1
-        err = dx - dy
-
-        w = info.width
-        h = info.height
-
-        while True:
-            # If we've reached the target cell, the path is clear
-            if x0 == x1 and y0 == y1:
-                return True
-
-            # Check current cell for obstacle
-            if 0 <= x0 < w and 0 <= y0 < h:
-                if self.slam_map_data[y0, x0] >= self.obstacle_threshold:
-                    return False
-            else:
-                # Outside map — stop ray (can't verify further)
-                return False
-
-            e2 = 2 * err
-            if e2 > -dy:
-                err -= dy
-                x0 += sx
-            if e2 < dx:
-                err += dx
-                y0 += sy
-
-    # ------------------------------------------------------------------
-    # Callbacks
-    # ------------------------------------------------------------------
 
     def _on_explore_resume(self, msg: Bool):
         if msg.data:
@@ -259,7 +155,7 @@ class CameraCoverageExplorer(Node):
         return wx, wy
 
     def _mark_fov(self, robot_x, robot_y, robot_yaw):
-        """Mark cells within camera FOV cone as seen, respecting occlusion."""
+        """Mark cells within camera FOV cone as seen."""
         half_fov = self.camera_hfov / 2.0
         max_range_sq = self.camera_max_range ** 2
 
@@ -276,13 +172,10 @@ class CameraCoverageExplorer(Node):
                 angle_to_cell = math.atan2(dy, dx)
                 angle_diff = self._angle_diff(angle_to_cell, robot_yaw)
                 if abs(angle_diff) <= half_fov:
-                    # Raycast: only mark if line-of-sight is clear
-                    if self._raycast_clear(robot_x, robot_y, cx, cy):
-                        self.coverage[gy, gx] = 1
+                    self.coverage[gy, gx] = 1
 
     def _count_visible_unseen(self, vx, vy, heading):
-        """Count unseen cells visible from a position at a given heading,
-        respecting occlusion from the SLAM map."""
+        """Count unseen cells visible from a position at a given heading."""
         half_fov = self.camera_hfov / 2.0
         max_range_sq = self.camera_max_range ** 2
         count = 0
@@ -299,8 +192,7 @@ class CameraCoverageExplorer(Node):
                 angle_to_cell = math.atan2(dy, dx)
                 angle_diff = self._angle_diff(angle_to_cell, heading)
                 if abs(angle_diff) <= half_fov:
-                    if self._raycast_clear(vx, vy, cx, cy):
-                        count += 1
+                    count += 1
         return count
 
     @staticmethod
@@ -422,10 +314,6 @@ class CameraCoverageExplorer(Node):
                 # Skip if too close to current position (we already rotated here)
                 dist = math.hypot(x - robot_x, y - robot_y)
                 if dist < self.viewpoint_spacing * 0.5:
-                    y += step
-                    continue
-                # Skip if the candidate is inside an obstacle
-                if self._is_obstacle_in_slam(x, y):
                     y += step
                     continue
                 # Score: total unseen cells visible across all rotation headings
