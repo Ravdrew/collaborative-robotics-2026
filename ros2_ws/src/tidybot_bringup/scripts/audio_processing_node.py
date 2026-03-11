@@ -23,8 +23,8 @@ from pydantic import BaseModel, Field
 # ---------- Gemini structured output schema ----------
 class LLMParse(BaseModel):
     pick_target: Literal["banana"] = Field(description="The object to pick up. Must be 'banana'.")
-    place_target: Literal["none", "bowl", "hand"] = Field(
-        description="Where to place it: none, bowl, or hand."
+    place_target: Literal["none", "book", "hand"] = Field(
+        description="Where to place it: none, book, or hand."
     )
     rationale: str = Field(description="Short reasoning. Keep it brief.")
 
@@ -33,10 +33,10 @@ SYSTEM_INSTRUCTION = """You are a robot instruction parser.
 
 Given a speech transcription, extract:
 - pick_target: must always be "banana"
-- place_target: where to put it, must be exactly one of: "none", "bowl", "hand"
+- place_target: where to put it, must be exactly one of: "none", "book", "hand"
 
 Rules:
-- If user says to return/put/place in a bowl/bin/container, choose "bowl".
+- If user says to return/put/place in a book/bin/container, choose "book".
 - If user says to hand/give/pass to a person / into their hand / palm, choose "hand".
 - If no destination is mentioned, choose "none".
 - pick_target should be a short noun phrase, lowercase, no punctuation.

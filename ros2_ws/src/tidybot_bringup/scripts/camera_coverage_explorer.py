@@ -51,12 +51,12 @@ class CameraCoverageExplorer(Node):
         self.declare_parameter("grid_size", 4.0)
         self.declare_parameter("camera_hfov_deg", 69.0)
         self.declare_parameter("camera_max_range", 2.5)
-        self.declare_parameter("rotation_steps", 6)
-        self.declare_parameter("rotation_speed", 0.3)
+        self.declare_parameter("rotation_steps", 12)
+        self.declare_parameter("rotation_speed", 0.15)
         self.declare_parameter("dwell_time", 1.5)
         self.declare_parameter("viewpoint_spacing", 0.5)
         self.declare_parameter("map_frame", "map")
-        self.declare_parameter("base_frame", "base_link")
+        self.declare_parameter("base_frame", "base_footprint")
 
         self.grid_resolution = self.get_parameter("grid_resolution").value
         self.grid_size = self.get_parameter("grid_size").value
