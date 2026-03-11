@@ -84,12 +84,12 @@ controller_server:
       ObstaclesCritic:
         enabled: true
         cost_power: 1
-        repulsion_weight: 1.5
+        repulsion_weight: 0.5
         critical_weight: 20.0
         consider_footprint: false
         collision_cost: 10000.0
-        collision_margin_distance: 0.1
-        near_goal_distance: 0.5
+        collision_margin_distance: 0.05
+        near_goal_distance: 0.75
       PathFollowCritic:
         enabled: true
         cost_power: 1
@@ -235,8 +235,8 @@ local_costmap:
           obstacle_min_range: 0.12
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
-        inflation_radius: 0.25
+        cost_scaling_factor: 8.0
+        inflation_radius: 0.15
       always_send_full_costmap: true
 
 global_costmap:
@@ -273,8 +273,8 @@ global_costmap:
           obstacle_min_range: 0.12
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 5.0
-        inflation_radius: 0.25
+        cost_scaling_factor: 8.0
+        inflation_radius: 0.15
       always_send_full_costmap: true
 
 waypoint_follower:
