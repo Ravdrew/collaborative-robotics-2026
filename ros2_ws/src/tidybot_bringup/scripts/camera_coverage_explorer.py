@@ -112,8 +112,7 @@ class CameraCoverageExplorer(Node):
     def _on_explore_resume(self, msg: Bool):
         if msg.data:
             if self.state == State.IDLE:
-                self.get_logger().info("Starting camera coverage exploration (resetting grid)")
-                self.coverage[:] = 0
+                self.get_logger().info("Starting camera coverage exploration")
                 self._start_rotation()
         else:
             if self.state != State.IDLE:
