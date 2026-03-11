@@ -4,14 +4,13 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import Image, CameraInfo
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Pose
 
 from cv_bridge import CvBridge
 
 import cv2
 import numpy as np
 import mediapipe as mp
-import pyrealsense2 as rs
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 
@@ -41,7 +40,7 @@ class HandPlaceTargetNode(Node):
 
         # Publisher
         self.target_pub = self.create_publisher(
-            PoseStamped,
+            Pose,
             '/place_target_local',
             10
         )
@@ -182,17 +181,14 @@ class HandPlaceTargetNode(Node):
 
     def publish_target(self, point, header):
 
-        msg = PoseStamped()
+        msg = Pose()
 
-        msg.header = header
-        msg.header.frame_id = "camera_color_optical_frame"
+        msg.position.x = float(point[0])
+        msg.position.y = float(point[1])
+        msg.position.z = float(point[2])
+        msg.orientation.w = 1.0
 
-        msg.pose.position.x = float(point[0])
-        msg.pose.position.y = float(point[1])
-        msg.pose.position.z = float(point[2])
-        msg.pose.orientation.w = 1.0
-
-        self.get_logger().info(f"Publishing target: x={msg.pose.position.x:.3f}, y={msg.pose.position.y:.3f}, z={msg.pose.position.z:.3f}")
+        self.get_logger().info(f"Publishing target: x={msg.position.x:.3f}, y={msg.position.y:.3f}, z={msg.position.z:.3f}")
         self.target_pub.publish(msg)
 
 

@@ -122,8 +122,9 @@ class FruitTargetNode(Node):
             self.get_logger().info("YOLO: no detections")
             return
 
-        # Find best detection among apples/bananas
-        best = None  # (conf, cls_name, (x1,y1,x2,y2))
+        # Find best detection per category (pick and place independently)
+        best_pick = None  # (conf, cls_name, (x1,y1,x2,y2))
+        best_place = None
         names = self.model.names  # dict or list mapping class id -> name
 
         for b in r0.boxes:
@@ -131,54 +132,57 @@ class FruitTargetNode(Node):
             conf = float(b.conf.item())
 
             cls_name = names[cls_id] if isinstance(names, (list, tuple)) else names.get(cls_id, str(cls_id))
-            if cls_name not in self.target_pick_classes and cls_name not in self.target_place_classes:
-                continue
 
             x1, y1, x2, y2 = b.xyxy[0].cpu().numpy().tolist()
-            if best is None or conf > best[0]:
-                best = (conf, cls_name, (x1, y1, x2, y2))
+            if cls_name in self.target_pick_classes:
+                if best_pick is None or conf > best_pick[0]:
+                    best_pick = (conf, cls_name, (x1, y1, x2, y2))
+            elif cls_name in self.target_place_classes:
+                if best_place is None or conf > best_place[0]:
+                    best_place = (conf, cls_name, (x1, y1, x2, y2))
 
-        if best is None:
-            self.get_logger().info("YOLO: detections found, but none were apple/banana/basket")
+        if best_pick is None and best_place is None:
+            self.get_logger().info("YOLO: detections found, but none were apple/banana/bowl")
             return
 
-        conf, cls_name, (x1, y1, x2, y2) = best
+        for action, best in [("pick", best_pick), ("place", best_place)]:
+            if best is None:
+                continue
 
-        width = x2 - x1
-        height = y2 - y1
+            conf, cls_name, (x1, y1, x2, y2) = best
 
-        orientation = 1.0 if width < height else -1.0
+            width = x2 - x1
+            height = y2 - y1
 
-        # Compute bbox center (pixel)
-        cx = int((x1 + x2) * 0.5)
-        cy = int((y1 + y2) * 0.5)
+            orientation = 1.0 if width < height else -1.0
 
-        # Clamp center to image bounds
-        cx = int(np.clip(cx, 0, w - 1))
-        cy = int(np.clip(cy, 0, h - 1))
+            # Compute bbox center (pixel)
+            cx = int((x1 + x2) * 0.5)
+            cy = int((y1 + y2) * 0.5)
 
-        # Robust depth at center using a small window median
-        depth_m = self.get_depth_median_meters(depth, cx, cy)
-        if depth_m is None or depth_m <= 0.0:
-            self.get_logger().info(f"{cls_name}: depth invalid at center ({cx},{cy}); skipping")
-            return
+            # Clamp center to image bounds
+            cx = int(np.clip(cx, 0, w - 1))
+            cy = int(np.clip(cy, 0, h - 1))
 
-        # Deproject to 3D (camera frame)
-        try:
-            X, Y, Z = self.deproject(cx, cy, depth_m, w, h)
-        except Exception as e:
-            self.get_logger().error(f"Deproject failed: {e}")
-            return
+            # Robust depth at center using a small window median
+            depth_m = self.get_depth_median_meters(depth, cx, cy)
+            if depth_m is None or depth_m <= 0.0:
+                self.get_logger().info(f"{cls_name}: depth invalid at center ({cx},{cy}); skipping")
+                continue
 
-        self.get_logger().info(
-            f"Best target: {cls_name} conf={conf:.2f} px=({cx},{cy}) depth={depth_m:.3f}m -> "
-            f"XYZ=({X:.3f},{Y:.3f},{Z:.3f})"
-        )
+            # Deproject to 3D (camera frame)
+            try:
+                X, Y, Z = self.deproject(cx, cy, depth_m, w, h)
+            except Exception as e:
+                self.get_logger().error(f"Deproject failed: {e}")
+                continue
 
-        if cls_name in self.target_pick_classes:
-            self.publish_target("pick", (X, Y, Z), orientation, rgb_msg.header)
-        elif cls_name in self.target_place_classes:
-            self.publish_target("place", (X, Y, Z), orientation, rgb_msg.header)
+            self.get_logger().info(
+                f"Best {action} target: {cls_name} conf={conf:.2f} px=({cx},{cy}) depth={depth_m:.3f}m -> "
+                f"XYZ=({X:.3f},{Y:.3f},{Z:.3f})"
+            )
+
+            self.publish_target(action, (X, Y, Z), orientation, rgb_msg.header)
 
     # --------------------------------------------------
 

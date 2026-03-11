@@ -414,12 +414,20 @@ def launch_setup(context, *args, **kwargs):
             output='screen',
         ))
 
-    # Fruit detection node (YOLO apple/banana detection -> /pick_target_local)
+    # Fruit detection node (YOLO apple/banana/bowl detection -> /pick_target_local, /place_target_local)
     if use_fruit_detection:
         nodes.append(Node(
             package='tidybot_bringup',
             executable='fruit_detection.py',
             name='fruit_detection',
+            output='screen',
+        ))
+
+        # Hand tracking node (MediaPipe hand detection -> /place_target_local for place_target="hand")
+        nodes.append(Node(
+            package='tidybot_bringup',
+            executable='our_hand_tracking.py',
+            name='hand_tracking',
             output='screen',
         ))
 
