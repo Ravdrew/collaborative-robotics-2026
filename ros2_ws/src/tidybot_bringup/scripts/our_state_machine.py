@@ -61,7 +61,7 @@ class StateMachineNode(Node):
         self.declare_parameter("fsm_pick_request_topic", "/fsm_pick_request")
         self.declare_parameter("fsm_place_request_topic", "/fsm_place_request")
         self.declare_parameter("explore_resume_topic", "explore/resume")
-        self.declare_parameter("nav_offset_m", 0.35)
+        self.declare_parameter("nav_offset_m", 0.25)
         self.declare_parameter("camera_frame", "camera_color_optical_frame")
         self.declare_parameter("map_frame", "map")
 
