@@ -11,6 +11,7 @@ bt_navigator:
       plugin: "nav2_bt_navigator/NavigateToPoseNavigator"
     navigate_through_poses:
       plugin: "nav2_bt_navigator/NavigateThroughPosesNavigator"
+
     error_code_names:
       - compute_path_error_code
       - follow_path_error_code
@@ -132,7 +133,7 @@ planner_server:
       allow_unknown: true #Claude suggested we might want to set this to false? This currently allows for planning on unknown spaces 
       max_iterations: 1000000
       max_on_approach_iterations: 1000
-      max_planning_time: 5.0
+      max_planning_time: 2.0
       motion_model_for_search: "REEDS_SHEPP"
       angle_quantization_bins: 72
       analytic_expansion_ratio: 3.5
