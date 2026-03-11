@@ -42,6 +42,7 @@ install(PROGRAMS
   scripts/state_machine_node.py
   scripts/our_hand_tracking.py
   scripts/fruit_detection.py
+  scripts/camera_coverage_explorer.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

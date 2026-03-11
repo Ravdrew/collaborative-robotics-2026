@@ -101,6 +101,7 @@ def launch_setup(context, *args, **kwargs):
     effective_use_top_camera = (sensor_mode == 'top_camera') and use_top_camera
     use_grasp_nodes = LaunchConfiguration('use_grasp_nodes').perform(context) == 'true'
     use_fruit_detection = LaunchConfiguration('use_fruit_detection').perform(context) == 'true'
+    use_camera_explorer = LaunchConfiguration('use_camera_explorer').perform(context) == 'true'
 
     # Get project root for uv packages
     tidybot2_path = os.environ.get('TIDYBOT2_PATH', '/home/locobot/tidybot2')
@@ -459,6 +460,15 @@ def launch_setup(context, *args, **kwargs):
             )],
         ))
 
+    # Camera coverage explorer (replaces explore_lite for object search)
+    if use_camera_explorer:
+        nodes.append(Node(
+            package='tidybot_bringup',
+            executable='camera_coverage_explorer.py',
+            name='camera_coverage_explorer',
+            output='screen',
+        ))
+
     return nodes
 
 
@@ -556,6 +566,10 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'use_fruit_detection', default_value='true',
             description='Launch YOLO fruit detection node (publishes to /pick_target_local)'
+        ),
+        DeclareLaunchArgument(
+            'use_camera_explorer', default_value='true',
+            description='Launch camera coverage explorer (replaces explore_lite)'
         ),
 
         # Setup function handles conditional node creation
