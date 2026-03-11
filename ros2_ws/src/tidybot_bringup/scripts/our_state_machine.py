@@ -203,11 +203,6 @@ class StateMachineNode(Node):
 
     def _on_pick_target_local(self, msg: Pose):
         self.event_counts["pick_target_local"] += 1
-        if self.state != SMState.PICK_EXPLORATION:
-            self.get_logger().warn(
-                f"Ignoring /pick_target_local in state={self.state.value}"
-            )
-            return
 
         map_pose = self._transform_to_map(msg)
         if map_pose is None:
@@ -216,18 +211,16 @@ class StateMachineNode(Node):
 
         self.pick_map_pose = map_pose
         self.get_logger().info(
-            f"Pick target in map: ({map_pose.position.x:.2f}, {map_pose.position.y:.2f})"
+            f"Pick target in map: ({map_pose.position.x:.2f}, {map_pose.position.y:.2f}) "
+            f"[state={self.state.value}]"
         )
-        self._publish_explore_resume(False)
-        self._transition(SMState.PICK_NAVIGATION, "pick target detected and transformed")
+
+        if self.state == SMState.PICK_EXPLORATION:
+            self._publish_explore_resume(False)
+            self._transition(SMState.PICK_NAVIGATION, "pick target detected and transformed")
 
     def _on_place_target_local(self, msg: Pose):
         self.event_counts["place_target_local"] += 1
-        if self.state != SMState.PLACE_EXPLORATION:
-            self.get_logger().warn(
-                f"Ignoring /place_target_local in state={self.state.value}"
-            )
-            return
 
         map_pose = self._transform_to_map(msg)
         if map_pose is None:
@@ -236,10 +229,13 @@ class StateMachineNode(Node):
 
         self.place_map_pose = map_pose
         self.get_logger().info(
-            f"Place target in map: ({map_pose.position.x:.2f}, {map_pose.position.y:.2f})"
+            f"Place target in map: ({map_pose.position.x:.2f}, {map_pose.position.y:.2f}) "
+            f"[state={self.state.value}]"
         )
-        self._publish_explore_resume(False)
-        self._transition(SMState.PLACE_NAVIGATION, "place target detected and transformed")
+
+        if self.state == SMState.PLACE_EXPLORATION:
+            self._publish_explore_resume(False)
+            self._transition(SMState.PLACE_NAVIGATION, "place target detected and transformed")
 
     def _on_successful_pick(self, msg: Bool):
         self.event_counts["successful_pick"] += 1
@@ -462,6 +458,10 @@ class StateMachineNode(Node):
     def _on_state_entry(self):
         """Run one-shot actions on state entry."""
         if self.state == SMState.PICK_EXPLORATION:
+            if self.pick_map_pose is not None:
+                self.get_logger().info("Pick target already known, skipping exploration")
+                self._transition(SMState.PICK_NAVIGATION, "pick target already saved")
+                return
             self._publish_explore_resume(True)
 
         elif self.state == SMState.PICK_NAVIGATION:
@@ -474,6 +474,10 @@ class StateMachineNode(Node):
             self._publish_pick_request_once()
 
         elif self.state == SMState.PLACE_EXPLORATION:
+            if self.place_map_pose is not None:
+                self.get_logger().info("Place target already known, skipping exploration")
+                self._transition(SMState.PLACE_NAVIGATION, "place target already saved")
+                return
             self._publish_explore_resume(True)
 
         elif self.state == SMState.PLACE_NAVIGATION:
