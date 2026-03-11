@@ -157,7 +157,7 @@ class StateMachineNode(Node):
         )
 
         # ---- Timers ----
-        self.create_timer(5.0, self._periodic_state_publish)
+        self.create_timer(5.0, self._periodic_state_log)
 
         # Keep stopping exploration until we actually need it (explore_lite
         # starts navigating immediately on launch, so we suppress it)
@@ -514,8 +514,10 @@ class StateMachineNode(Node):
         self.state_pub.publish(out)
         self.get_logger().info(f"Published state: '{self.state.value}'")
 
-    def _periodic_state_publish(self):
-        self._publish_state()
+    def _periodic_state_log(self):
+        now_ns = self.get_clock().now().nanoseconds
+        dwell_s = (now_ns - self.state_enter_ns) * 1e-9
+        self.get_logger().info(f"[state] {self.state.value} (dwell={dwell_s:.1f}s)")
 
 
 def main():
