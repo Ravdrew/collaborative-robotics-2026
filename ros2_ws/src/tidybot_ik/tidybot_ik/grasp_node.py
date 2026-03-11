@@ -68,7 +68,7 @@ _FINGERS_DOWN_HORIZONTAL = (0.5, 0.5, 0.5, -0.5)  # (qw, qx, qy, qz)
 _FINGERS_DOWN_VERTICAL = (0, 0.707107, 0, 0.707107)   # (qw, qx, qy, qz)
 
 # Gripper positions (0.0 = open, 1.0 = closed — matches test_arms_sim.py)
-_GRIPPER_OPEN   = 0.1
+_GRIPPER_OPEN   = 0.0
 _GRIPPER_CLOSED = 0.9
 
 _CAMERA_PAN = 0.6
@@ -418,25 +418,6 @@ class GraspNode(Node):
                     next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
                     self._transition(next_state)
                     return
-
-                # Stall detection: if EEF hasn't moved significantly, close and raise
-                now = self.get_clock().now().nanoseconds * 1e-9
-                if self._last_eef_dist is not None:
-                    moved = abs(dist - self._last_eef_dist)
-                    if moved > self.eef_stall_threshold:
-                        self._last_eef_move_time = now
-                    elif self._last_eef_move_time is not None and (now - self._last_eef_move_time) > self.eef_stall_timeout:
-                        self.get_logger().warn(
-                            f'EEF stalled for {self.eef_stall_timeout:.1f}s '
-                            f'(dist={dist:.4f} m). Closing gripper and raising.')
-                        self._last_eef_dist = None
-                        self._last_eef_move_time = None
-                        next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
-                        self._transition(next_state)
-                        return
-                else:
-                    self._last_eef_move_time = now
-                self._last_eef_dist = dist
 
             if self._elapsed() > 20.0:
                 self.get_logger().warn('Timed out waiting for EEF — closing gripper and raising.')
