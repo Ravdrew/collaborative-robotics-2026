@@ -1,0 +1,25 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from tidybot_msgs/msg/ArmCommand.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module tidybot_msgs {
+  module msg {
+    typedef double double__6[6];
+    @verbatim (language="comment", text=
+      "Target joint positions for a 6-DOF WX250s arm" "\n"
+      "Joint order: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate")
+    struct ArmCommand {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "Target positions in radians for each joint")
+      double__6 joint_positions;
+
+      @verbatim (language="comment", text=
+        "Time to reach target in seconds (0 = immediate/as fast as possible)")
+      double duration;
+    };
+  };
+};

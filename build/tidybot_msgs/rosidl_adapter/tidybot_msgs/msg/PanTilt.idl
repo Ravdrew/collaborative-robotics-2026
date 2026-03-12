@@ -1,0 +1,26 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from tidybot_msgs/msg/PanTilt.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module tidybot_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Pan-tilt camera gimbal command" "\n"
+      "Controls the RealSense D435 camera orientation")
+    struct PanTilt {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "Pan angle in radians" "\n"
+        "Range: [-1.57, 1.57] (approximately +/- 90 degrees)")
+      double pan;
+
+      @verbatim (language="comment", text=
+        "Tilt angle in radians" "\n"
+        "Range: [-1.57, 1.31] (approximately -90 to +75 degrees)")
+      double tilt;
+    };
+  };
+};

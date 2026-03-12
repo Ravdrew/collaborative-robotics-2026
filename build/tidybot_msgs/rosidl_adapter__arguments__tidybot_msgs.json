@@ -1,0 +1,14 @@
+{
+  "package_name": "tidybot_msgs",
+  "non_idl_tuples": [
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:msg/ArmCommand.msg",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:msg/ArmVelocityCommand.msg",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:msg/CartesianVelocityCommand.msg",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:msg/GripperCommand.msg",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:msg/PanTilt.msg",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:srv/SolveIK.srv",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:srv/GetJointState.srv",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:srv/PlanToTarget.srv",
+    "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/ros2_ws/src/tidybot_msgs:srv/AudioRecord.srv"
+  ]
+}

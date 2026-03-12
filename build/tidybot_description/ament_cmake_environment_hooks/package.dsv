@@ -1,0 +1,4 @@
+source;share/tidybot_description/local_setup.bash
+source;share/tidybot_description/local_setup.dsv
+source;share/tidybot_description/local_setup.sh
+source;share/tidybot_description/local_setup.zsh

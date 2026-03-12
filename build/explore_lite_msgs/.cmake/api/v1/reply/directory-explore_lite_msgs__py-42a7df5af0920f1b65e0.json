@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "explore_lite_msgs__py",
+		"source" : "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/explore_lite_msgs/explore_lite_msgs__py"
+	}
+}

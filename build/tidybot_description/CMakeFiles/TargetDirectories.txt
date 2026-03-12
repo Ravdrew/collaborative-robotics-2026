@@ -1,0 +1,9 @@
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/uninstall.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/tidybot_description_uninstall.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/test.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/edit_cache.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/rebuild_cache.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/list_install_components.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/install.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/install/local.dir
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_description/CMakeFiles/install/strip.dir

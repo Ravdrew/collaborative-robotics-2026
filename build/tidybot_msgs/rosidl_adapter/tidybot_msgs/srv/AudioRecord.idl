@@ -1,0 +1,39 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from tidybot_msgs/srv/AudioRecord.srv
+// generated code does not contain a copyright notice
+
+
+module tidybot_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Audio recording service" "\n"
+      "Call with start=true to begin recording, start=false to stop and return audio")
+    struct AudioRecord_Request {
+      @verbatim (language="comment", text=
+        "true = start recording, false = stop recording and return audio")
+      boolean start;
+    };
+    struct AudioRecord_Response {
+      @verbatim (language="comment", text=
+        "Whether the operation succeeded")
+      boolean success;
+
+      @verbatim (language="comment", text=
+        "Status message")
+      string message;
+
+      @verbatim (language="comment", text=
+        "Recorded audio samples (PCM float32, mono)" "\n"
+        "Only populated when start=false (stop)")
+      sequence<float> audio_data;
+
+      @verbatim (language="comment", text=
+        "Sample rate in Hz (e.g., 16000)")
+      int32 sample_rate;
+
+      @verbatim (language="comment", text=
+        "Duration of recording in seconds")
+      double duration;
+    };
+  };
+};
