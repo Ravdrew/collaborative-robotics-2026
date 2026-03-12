@@ -81,9 +81,9 @@ class FruitTargetNode(Node):
         self.detection_enabled = msg.data
         if msg.data and was_disabled:
             # Brief cooldown so stale buffered images pass through before publishing
-            self.get_logger().info("Detection re-enabled — cooldown 1s")
+            self.get_logger().info("Detection re-enabled — cooldown 2s")
             self.detection_cooldown = True
-            self.create_timer(1.0, self._end_cooldown)
+            self.create_timer(2.0, self._end_cooldown)
 
     def _end_cooldown(self):
         self.detection_cooldown = False
