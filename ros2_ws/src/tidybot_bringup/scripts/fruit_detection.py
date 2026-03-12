@@ -71,6 +71,7 @@ class FruitTargetNode(Node):
 
         # Detection gating: only publish when enabled (robot stationary)
         self.detection_enabled = True
+        self.detection_cooldown = False  # brief delay after re-enabling
         self.create_subscription(Bool, "/detection_enabled", self._on_detection_enabled, 10)
 
         self.get_logger().info("Fruit target node started (YOLO: apple/banana + book).")
@@ -80,16 +81,23 @@ class FruitTargetNode(Node):
         self.detection_enabled = msg.data
         if msg.data and was_disabled:
             # Re-create the sync to flush stale buffered images
-            self.get_logger().info("Detection re-enabled — flushing image sync buffer")
+            self.get_logger().info("Detection re-enabled — flushing buffer, cooldown 1s")
             self.sync = ApproximateTimeSynchronizer(
                 [self.rgb_sub, self.depth_sub],
                 queue_size=10,
                 slop=0.1
             )
             self.sync.registerCallback(self.image_callback)
+            # Brief cooldown so fresh images fill the pipeline
+            self.detection_cooldown = True
+            self.create_timer(1.0, self._end_cooldown)
+
+    def _end_cooldown(self):
+        self.detection_cooldown = False
+        self.get_logger().info("Detection cooldown ended — publishing detections")
 
     def image_callback(self, rgb_msg, depth_msg):
-        if not self.detection_enabled:
+        if not self.detection_enabled or self.detection_cooldown:
             return
         self.get_logger().debug("image_callback: received messages")
 
