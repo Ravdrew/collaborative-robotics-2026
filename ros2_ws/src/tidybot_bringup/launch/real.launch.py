@@ -34,6 +34,7 @@ ros2 topic pub /state_machine --once std_msgs/msg/String "{data: 'audio_processi
     ros2 launch tidybot_bringup real.launch.py use_sim_topics:=false  # Disable sim-compatible topics
     ros2 launch tidybot_bringup real.launch.py use_grasp_nodes:=false  # Disable grasp nodes
     ros2 launch tidybot_bringup real.launch.py use_fruit_detection:=false  # Disable fruit detection
+    ros2 launch tidybot_bringup real.launch.py use_hand_tracking:=false  # Disable hand tracking
 
 Sim-to-Real Topic Compatibility (use_sim_topics:=true, default):
     When enabled, the following simulation-compatible topics are available:
@@ -101,6 +102,7 @@ def launch_setup(context, *args, **kwargs):
     effective_use_top_camera = (sensor_mode == 'top_camera') and use_top_camera
     use_grasp_nodes = LaunchConfiguration('use_grasp_nodes').perform(context) == 'true'
     use_fruit_detection = LaunchConfiguration('use_fruit_detection').perform(context) == 'true'
+    use_hand_tracking = LaunchConfiguration('use_hand_tracking').perform(context) == 'true'
     use_camera_explorer = LaunchConfiguration('use_camera_explorer').perform(context) == 'true'
 
     # Get project root for uv packages
@@ -413,6 +415,9 @@ def launch_setup(context, *args, **kwargs):
             executable='grasp_node',
             name='grasp_node',
             output='screen',
+            parameters=[{
+                'gripper_mode': 'real',
+            }],
         ))
 
     # Fruit detection node (YOLO apple/banana detection -> /pick_target_local)
@@ -421,6 +426,15 @@ def launch_setup(context, *args, **kwargs):
             package='tidybot_bringup',
             executable='fruit_detection.py',
             name='fruit_detection',
+            output='screen',
+        ))
+
+    # Hand tracking node (MediaPipe -> /place_target_local)
+    if use_hand_tracking:
+        nodes.append(Node(
+            package='tidybot_bringup',
+            executable='our_hand_tracking.py',
+            name='hand_place_target',
             output='screen',
         ))
 
@@ -571,6 +585,10 @@ def generate_launch_description():
             'use_camera_explorer', default_value='true',
             description='Launch camera coverage explorer (replaces explore_lite)'
         ),
+        DeclareLaunchArgument(
+            'use_hand_tracking', default_value='true',
+            description='Launch MediaPipe hand tracking place-target node'
+        ),        
 
         # Setup function handles conditional node creation
         OpaqueFunction(function=launch_setup),
