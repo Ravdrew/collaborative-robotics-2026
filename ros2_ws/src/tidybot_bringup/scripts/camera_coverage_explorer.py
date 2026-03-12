@@ -433,6 +433,12 @@ class CameraCoverageExplorer(Node):
                 if self._is_obstacle_in_slam(x, y):
                     y += step
                     continue
+                # Only consider positions the camera has already seen
+                gx, gy = self._world_to_grid(x, y)
+                if (0 <= gx < self.grid_cells and 0 <= gy < self.grid_cells
+                        and self.coverage[gy, gx] == 0):
+                    y += step
+                    continue
                 # Score: total unseen cells visible across all rotation headings
                 score = 0
                 for i in range(self.rotation_steps):
