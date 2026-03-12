@@ -67,16 +67,16 @@ class HandPlaceTargetNode(Node):
     def image_callback(self, rgb_msg, depth_msg):
 
         # Callback entry
-        self.get_logger().info("image_callback: received messages")
-        self.get_logger().debug("image_callback called")
+        self.get_logger().info("Hand tracker image_callback: received messages")
+        self.get_logger().debug("Hand reacker image_callback called")
 
         # Convert ROS → OpenCV
         try:
             rgb = self.bridge.imgmsg_to_cv2(rgb_msg, 'bgr8')
             depth = self.bridge.imgmsg_to_cv2(depth_msg, 'passthrough')
         except Exception as e:
-            self.get_logger().info(f"Failed to convert images: {e}")
-            self.get_logger().error(f"Failed to convert images: {e}")
+            self.get_logger().info(f"Hand tracker failed to convert images: {e}")
+            self.get_logger().error(f"Hand tracker failed to convert images: {e}")
             return
 
         rgb_rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
@@ -105,7 +105,7 @@ class HandPlaceTargetNode(Node):
             # Check bounds
             if px < 0 or px >= w or py < 0 or py >= h:
                 skipped_oob += 1
-                self.get_logger().info(f"Landmark out of bounds: px={px}, py={py}, w={w}, h={h}")
+                self.get_logger().info(f"Hand tracker landmark out of bounds: px={px}, py={py}, w={w}, h={h}")
                 continue
 
             # Depth in meters (RealSense usually mm → convert)
@@ -113,7 +113,7 @@ class HandPlaceTargetNode(Node):
             try:
                 depth_val = float(depth_raw) * 0.001
             except Exception as e:
-                self.get_logger().info(f"Depth access error at ({py},{px}): {e}")
+                self.get_logger().info(f"Hand tracker depth access error at ({py},{px}): {e}")
                 continue
 
             if depth_val == 0:
@@ -124,14 +124,14 @@ class HandPlaceTargetNode(Node):
             try:
                 X, Y, Z = self.deproject(px, py, depth_val, w, h)
             except Exception as e:
-                self.get_logger().info(f"Deproject failed for px={px},py={py},d={depth_val}: {e}")
+                self.get_logger().info(f"Hand tracker back-projection failed for px={px},py={py},d={depth_val}: {e}")
                 continue
 
             landmark_3d_points.append([X, Y, Z])
 
-        self.get_logger().info(f"Collected 3D landmarks: {len(landmark_3d_points)} (skipped_depth_zero={skipped_depth_zero}, skipped_oob={skipped_oob})")
+        self.get_logger().info(f"Hand tracker collected 3D landmarks: {len(landmark_3d_points)} (skipped_depth_zero={skipped_depth_zero}, skipped_oob={skipped_oob})")
         if len(landmark_3d_points) < 21:
-            self.get_logger().info("Not enough valid 3D landmarks to publish target")
+            self.get_logger().info("Hand tracker: Not enough valid 3D landmarks to publish target")
             return
 
         landmark_3d_points = np.array(landmark_3d_points)
@@ -143,7 +143,7 @@ class HandPlaceTargetNode(Node):
 
         palm_center = np.mean(palm_points, axis=0)
 
-        self.get_logger().info(f"Palm center (camera frame): {palm_center}")
+        self.get_logger().info(f"Hand tracker: Palm center (camera frame): {palm_center}")
         self.publish_target(palm_center, rgb_msg.header)
 
     # --------------------------------------------------
@@ -166,7 +166,7 @@ class HandPlaceTargetNode(Node):
 
         # Debug small sanity check
         if not np.isfinite(X) or not np.isfinite(Y) or not np.isfinite(Z):
-            self.get_logger().info(f"Deproject produced non-finite: px={px},py={py},depth={depth},X={X},Y={Y},Z={Z}")
+            self.get_logger().info(f"Hand tracker: Back-projection produced non-finite: px={px},py={py},depth={depth},X={X},Y={Y},Z={Z}")
 
         # Deproject with RS
         # point_3d = rs.rs2_deproject_pixel_to_point(
@@ -192,7 +192,7 @@ class HandPlaceTargetNode(Node):
         msg.pose.position.z = float(point[2])
         msg.pose.orientation.w = 1.0
 
-        self.get_logger().info(f"Publishing target: x={msg.pose.position.x:.3f}, y={msg.pose.position.y:.3f}, z={msg.pose.position.z:.3f}")
+        self.get_logger().info(f"Hand tracker publishing target: x={msg.pose.position.x:.3f}, y={msg.pose.position.y:.3f}, z={msg.pose.position.z:.3f}")
         self.target_pub.publish(msg)
 
 
