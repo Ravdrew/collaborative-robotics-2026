@@ -76,7 +76,17 @@ class FruitTargetNode(Node):
         self.get_logger().info("Fruit target node started (YOLO: apple/banana + book).")
 
     def _on_detection_enabled(self, msg: Bool):
+        was_disabled = not self.detection_enabled
         self.detection_enabled = msg.data
+        if msg.data and was_disabled:
+            # Re-create the sync to flush stale buffered images
+            self.get_logger().info("Detection re-enabled — flushing image sync buffer")
+            self.sync = ApproximateTimeSynchronizer(
+                [self.rgb_sub, self.depth_sub],
+                queue_size=10,
+                slop=0.1
+            )
+            self.sync.registerCallback(self.image_callback)
 
     def image_callback(self, rgb_msg, depth_msg):
         if not self.detection_enabled:
