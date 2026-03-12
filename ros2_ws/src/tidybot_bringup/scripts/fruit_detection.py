@@ -80,15 +80,8 @@ class FruitTargetNode(Node):
         was_disabled = not self.detection_enabled
         self.detection_enabled = msg.data
         if msg.data and was_disabled:
-            # Re-create the sync to flush stale buffered images
-            self.get_logger().info("Detection re-enabled — flushing buffer, cooldown 1s")
-            self.sync = ApproximateTimeSynchronizer(
-                [self.rgb_sub, self.depth_sub],
-                queue_size=10,
-                slop=0.1
-            )
-            self.sync.registerCallback(self.image_callback)
-            # Brief cooldown so fresh images fill the pipeline
+            # Brief cooldown so stale buffered images pass through before publishing
+            self.get_logger().info("Detection re-enabled — cooldown 1s")
             self.detection_cooldown = True
             self.create_timer(1.0, self._end_cooldown)
 
