@@ -78,6 +78,8 @@ class StateMachineNode(Node):
         self.map_frame = str(self.get_parameter("map_frame").value)
         self.pick_attempt = 0
         self.max_pick_attempts = 3
+        self.place_attempt = 0
+        self.max_place_attempts = 3
 
         self.transition_count = 0
         self.last_transition_reason = "startup"
@@ -277,9 +279,21 @@ class StateMachineNode(Node):
             return
 
         if bool(msg.data):
+            self.place_attempt = 0
             self._transition(SMState.FINISHED, "placing_done=true")
         else:
-            self.get_logger().warn("placing_done=false; staying in placing and waiting")
+            self.place_attempt += 1
+            if self.place_attempt < self.max_place_attempts:
+                self.get_logger().warn(
+                    f"Place failed (attempt {self.place_attempt}/{self.max_place_attempts}), retrying..."
+                )
+                self._publish_place_request_once()
+            else:
+                self.get_logger().error(
+                    f"Place failed after {self.max_place_attempts} attempts, giving up"
+                )
+                self.place_attempt = 0
+                self._transition(SMState.FINISHED, "place failed after max retries")
 
     # ===================== Nav2 Action =====================
 
