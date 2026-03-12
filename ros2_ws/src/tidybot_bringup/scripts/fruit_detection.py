@@ -71,7 +71,7 @@ class FruitTargetNode(Node):
 
         # Detection gating: only publish when enabled (robot stationary)
         self.detection_enabled = True
-        self.detection_cooldown = False  # brief delay after re-enabling
+        self.detection_cooldown = False
         self.create_subscription(Bool, "/detection_enabled", self._on_detection_enabled, 10)
 
         self.get_logger().info("Fruit target node started (YOLO: apple/banana + book).")
@@ -80,7 +80,6 @@ class FruitTargetNode(Node):
         was_disabled = not self.detection_enabled
         self.detection_enabled = msg.data
         if msg.data and was_disabled:
-            # Brief cooldown so stale buffered images pass through before publishing
             self.get_logger().info("Detection re-enabled — cooldown 2s")
             self.detection_cooldown = True
             self.create_timer(2.0, self._end_cooldown)
