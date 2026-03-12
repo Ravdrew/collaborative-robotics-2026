@@ -4,14 +4,13 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import Image, CameraInfo
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Pose
 
 from cv_bridge import CvBridge
 
 import cv2
 import numpy as np
 import mediapipe as mp
-import pyrealsense2 as rs
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 
@@ -41,14 +40,26 @@ class HandPlaceTargetNode(Node):
 
         # Publisher
         self.target_pub = self.create_publisher(
-            PoseStamped,
+            Pose,
             '/place_target_local',
+            10
+        )
+
+        # Camera intrinsics
+        self.fx = None
+        self.fy = None
+        self.cx = None
+        self.cy = None
+        self.create_subscription(
+            CameraInfo,
+            '/camera/color/camera_info',
+            self.camera_info_callback,
             10
         )
 
         # CV bridge
         self.bridge = CvBridge()
-        
+
         self.get_logger().info("Initializing MediaPipe Hands...")
 
         # MediaPipe Hands
@@ -148,33 +159,31 @@ class HandPlaceTargetNode(Node):
 
     # --------------------------------------------------
 
-    def deproject(self, px, py, depth, w, h):
-        """
-        Simple pinhole back-projection.
-        Replace intrinsics with CameraInfo in production.
-        """
+    def camera_info_callback(self, msg: CameraInfo):
+        self.fx = msg.k[0]
+        self.fy = msg.k[4]
+        self.cx = msg.k[2]
+        self.cy = msg.k[5]
+        self.get_logger().info(
+            f"Camera intrinsics received: fx={self.fx:.1f} fy={self.fy:.1f} "
+            f"cx={self.cx:.1f} cy={self.cy:.1f}",
+            once=True
+        )
 
-        # Deproject manually
-        fx = 600.0
-        fy = 600.0
-        cx = w / 2.0
-        cy = h / 2.0
+    def deproject(self, px, py, depth, w, h):
+        if self.fx is not None:
+            fx, fy, cx, cy = self.fx, self.fy, self.cx, self.cy
+        else:
+            self.get_logger().warn("Camera intrinsics not yet received, using fallback values")
+            fx, fy = 600.0, 600.0
+            cx, cy = w / 2.0, h / 2.0
 
         X = (px - cx) * depth / fx
         Y = (py - cy) * depth / fy
         Z = depth
 
-        # Debug small sanity check
         if not np.isfinite(X) or not np.isfinite(Y) or not np.isfinite(Z):
-            self.get_logger().info(f"Hand tracker: Back-projection produced non-finite: px={px},py={py},depth={depth},X={X},Y={Y},Z={Z}")
-
-        # Deproject with RS
-        # point_3d = rs.rs2_deproject_pixel_to_point(
-        #     intrinsics,
-        #     [px, py],
-        #     depth
-        # )
-        # X, Y, Z = point_3d
+            raise ValueError(f"Non-finite deproject: X={X}, Y={Y}, Z={Z}")
 
         return X, Y, Z
 
@@ -182,17 +191,14 @@ class HandPlaceTargetNode(Node):
 
     def publish_target(self, point, header):
 
-        msg = PoseStamped()
+        msg = Pose()
 
-        msg.header = header
-        msg.header.frame_id = "camera_color_optical_frame"
+        msg.position.x = float(point[0])
+        msg.position.y = float(point[1])
+        msg.position.z = float(point[2])
+        msg.orientation.w = 1.0
 
-        msg.pose.position.x = float(point[0])
-        msg.pose.position.y = float(point[1])
-        msg.pose.position.z = float(point[2])
-        msg.pose.orientation.w = 1.0
-
-        self.get_logger().info(f"Hand tracker publishing target: x={msg.pose.position.x:.3f}, y={msg.pose.position.y:.3f}, z={msg.pose.position.z:.3f}")
+        self.get_logger().info(f"Hand tracker publishing target: x={msg.position.x:.3f}, y={msg.position.y:.3f}, z={msg.position.z:.3f}")
         self.target_pub.publish(msg)
 
 
