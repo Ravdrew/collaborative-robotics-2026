@@ -31,7 +31,6 @@ from geometry_msgs.msg import Pose, PoseStamped, Quaternion
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool, String
 
 
@@ -116,16 +115,6 @@ class StateMachineNode(Node):
         self.detection_enabled_pub = self.create_publisher(
             Bool, "/detection_enabled", 10
         )
-        self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
-
-        # Nudge behavior: slow turn if no detection after waiting
-        self.nudge_timeout_timer = None
-        self.nudge_step_timer = None
-        self.nudge_step = 0  # 0=left, 1=dwell_left, 2=right, 3=dwell_right, 4=center, 5=done
-        self.nudge_speed = 0.05  # rad/s — very slow
-        self.nudge_angle_deg = 5.0
-        self.nudge_turn_duration = math.radians(self.nudge_angle_deg) / self.nudge_speed  # ~1.7s
-        self.nudge_dwell = 3.0  # seconds to dwell at each offset
 
         # ---- Subscriptions ----
         self.create_subscription(
@@ -389,89 +378,6 @@ class StateMachineNode(Node):
         self.detection_enabled_pub.publish(msg)
         self.get_logger().info(f"Published /detection_enabled={enabled}")
 
-    def _start_nudge_timeout(self):
-        """Start a 10s timer; if it fires, begin the nudge sequence."""
-        self._cancel_nudge()
-        self.nudge_timeout_timer = self.create_timer(15.0, self._begin_nudge, callback_group=None)
-
-    def _cancel_nudge(self):
-        """Cancel any active nudge timers."""
-        if self.nudge_timeout_timer is not None:
-            self.nudge_timeout_timer.cancel()
-            self.nudge_timeout_timer = None
-        if self.nudge_step_timer is not None:
-            self.nudge_step_timer.cancel()
-            self.nudge_step_timer = None
-        self.nudge_step = 0
-        # Stop any residual rotation
-        self.cmd_vel_pub.publish(Twist())
-
-    def _begin_nudge(self):
-        """Called after 10s with no detection. Start nudge sequence."""
-        if self.nudge_timeout_timer is not None:
-            self.nudge_timeout_timer.cancel()
-            self.nudge_timeout_timer = None
-        self.get_logger().info("No detection after 15s — starting nudge (turn left/right)")
-        self.nudge_step = 0
-        self._execute_nudge_step()
-
-    def _execute_nudge_step(self):
-        """Step through the nudge sequence: left, dwell, right, dwell, center."""
-        if self.nudge_step_timer is not None:
-            self.nudge_step_timer.cancel()
-            self.nudge_step_timer = None
-
-        twist = Twist()
-
-        if self.nudge_step == 0:
-            # Turn left (positive angular.z)
-            self.get_logger().info("Nudge: turning left 5°")
-            twist.angular.z = self.nudge_speed
-            self.cmd_vel_pub.publish(twist)
-            self.nudge_step_timer = self.create_timer(
-                self.nudge_turn_duration, self._nudge_next)
-
-        elif self.nudge_step == 1:
-            # Stop and dwell
-            self.cmd_vel_pub.publish(twist)
-            self.get_logger().info("Nudge: dwelling left")
-            self.nudge_step_timer = self.create_timer(self.nudge_dwell, self._nudge_next)
-
-        elif self.nudge_step == 2:
-            # Turn right (10° to go from +5° to -5°)
-            self.get_logger().info("Nudge: turning right 10°")
-            twist.angular.z = -self.nudge_speed
-            self.cmd_vel_pub.publish(twist)
-            self.nudge_step_timer = self.create_timer(
-                self.nudge_turn_duration * 2.0, self._nudge_next)
-
-        elif self.nudge_step == 3:
-            # Stop and dwell
-            self.cmd_vel_pub.publish(twist)
-            self.get_logger().info("Nudge: dwelling right")
-            self.nudge_step_timer = self.create_timer(self.nudge_dwell, self._nudge_next)
-
-        elif self.nudge_step == 4:
-            # Return to center (turn left 5°)
-            self.get_logger().info("Nudge: returning to center")
-            twist.angular.z = self.nudge_speed
-            self.cmd_vel_pub.publish(twist)
-            self.nudge_step_timer = self.create_timer(
-                self.nudge_turn_duration, self._nudge_next)
-
-        else:
-            # Done
-            self.cmd_vel_pub.publish(twist)
-            self.get_logger().info("Nudge sequence complete")
-
-    def _nudge_next(self):
-        """Advance to the next nudge step."""
-        if self.nudge_step_timer is not None:
-            self.nudge_step_timer.cancel()
-            self.nudge_step_timer = None
-        self.nudge_step += 1
-        self._execute_nudge_step()
-
     def _publish_explore_resume(self, resume: bool):
         msg = Bool()
         msg.data = resume
@@ -577,7 +483,6 @@ class StateMachineNode(Node):
         elif self.state == SMState.PICKING:
             self._publish_detection_enabled(True)
             self._publish_pick_request_once()
-            self._start_nudge_timeout()
 
         elif self.state == SMState.PLACE_EXPLORATION:
             if self.place_map_pose is not None:
@@ -596,7 +501,6 @@ class StateMachineNode(Node):
         elif self.state == SMState.PLACING:
             self._publish_detection_enabled(True)
             self._publish_place_request_once()
-            self._start_nudge_timeout()
 
         elif self.state == SMState.FINISHED:
             self.get_logger().info(":) Mission complete! All done.")
@@ -609,7 +513,6 @@ class StateMachineNode(Node):
         now_ns = self.get_clock().now().nanoseconds
         dwell_s = (now_ns - self.state_enter_ns) * 1e-9
 
-        self._cancel_nudge()
         self.state = new_state
         self.transition_count += 1
         self.last_transition_reason = reason
