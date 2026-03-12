@@ -392,7 +392,7 @@ class StateMachineNode(Node):
     def _start_nudge_timeout(self):
         """Start a 10s timer; if it fires, begin the nudge sequence."""
         self._cancel_nudge()
-        self.nudge_timeout_timer = self.create_timer(20.0, self._begin_nudge, callback_group=None)
+        self.nudge_timeout_timer = self.create_timer(15.0, self._begin_nudge, callback_group=None)
 
     def _cancel_nudge(self):
         """Cancel any active nudge timers."""
@@ -411,7 +411,7 @@ class StateMachineNode(Node):
         if self.nudge_timeout_timer is not None:
             self.nudge_timeout_timer.cancel()
             self.nudge_timeout_timer = None
-        self.get_logger().info("No detection after 20s — starting nudge (turn left/right)")
+        self.get_logger().info("No detection after 15s — starting nudge (turn left/right)")
         self.nudge_step = 0
         self._execute_nudge_step()
 
