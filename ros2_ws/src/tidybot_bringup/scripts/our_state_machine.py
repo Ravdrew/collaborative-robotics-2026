@@ -112,6 +112,9 @@ class StateMachineNode(Node):
         self.fsm_place_request_pub = self.create_publisher(
             Bool, str(self.get_parameter("fsm_place_request_topic").value), 10
         )
+        self.detection_enabled_pub = self.create_publisher(
+            Bool, "/detection_enabled", 10
+        )
 
         # ---- Subscriptions ----
         self.create_subscription(
@@ -369,6 +372,12 @@ class StateMachineNode(Node):
                 "both /pick_target and /place_target received",
             )
 
+    def _publish_detection_enabled(self, enabled: bool):
+        msg = Bool()
+        msg.data = enabled
+        self.detection_enabled_pub.publish(msg)
+        self.get_logger().info(f"Published /detection_enabled={enabled}")
+
     def _publish_explore_resume(self, resume: bool):
         msg = Bool()
         msg.data = resume
@@ -465,12 +474,14 @@ class StateMachineNode(Node):
             self._publish_explore_resume(True)
 
         elif self.state == SMState.PICK_NAVIGATION:
+            self._publish_detection_enabled(False)
             if self.pick_map_pose is not None:
                 self._send_nav_goal(self.pick_map_pose, "pick")
             else:
                 self.get_logger().error("No pick_map_pose set for PICK_NAVIGATION!")
 
         elif self.state == SMState.PICKING:
+            self._publish_detection_enabled(True)
             self._publish_pick_request_once()
 
         elif self.state == SMState.PLACE_EXPLORATION:
@@ -481,12 +492,14 @@ class StateMachineNode(Node):
             self._publish_explore_resume(True)
 
         elif self.state == SMState.PLACE_NAVIGATION:
+            self._publish_detection_enabled(False)
             if self.place_map_pose is not None:
                 self._send_nav_goal(self.place_map_pose, "place")
             else:
                 self.get_logger().error("No place_map_pose set for PLACE_NAVIGATION!")
 
         elif self.state == SMState.PLACING:
+            self._publish_detection_enabled(True)
             self._publish_place_request_once()
 
         elif self.state == SMState.FINISHED:
