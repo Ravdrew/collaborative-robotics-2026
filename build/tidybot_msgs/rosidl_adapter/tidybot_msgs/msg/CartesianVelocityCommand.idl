@@ -1,0 +1,30 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from tidybot_msgs/msg/CartesianVelocityCommand.msg
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Twist.idl"
+#include "std_msgs/msg/Header.idl"
+
+module tidybot_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "End-effector Cartesian velocity command" "\n"
+      "Controls the velocity of the arm's end-effector in task space")
+    struct CartesianVelocityCommand {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "Linear velocity (m/s) and angular velocity (rad/s)")
+      geometry_msgs::msg::Twist twist;
+
+      @verbatim (language="comment", text=
+        "Reference frame for the velocity command" "\n"
+        "Options: \"base_link\" (world-aligned) or \"end_effector\" (tool-aligned)")
+      string frame_id;
+
+      @verbatim (language="comment", text=
+        "Duration to apply velocity in seconds (0 = until next command)")
+      double duration;
+    };
+  };
+};

@@ -1,0 +1,58 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from tidybot_msgs/srv/SolveIK.srv
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Pose.idl"
+
+module tidybot_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Inverse kinematics service request" "\n"
+      "Computes joint positions for a target end-effector pose")
+    struct SolveIK_Request {
+      @verbatim (language="comment", text=
+        "Arm to solve IK for: \"right\" or \"left\"")
+      string arm_name;
+
+      @verbatim (language="comment", text=
+        "Target end-effector pose in base_link frame")
+      geometry_msgs::msg::Pose target_pose;
+
+      @verbatim (language="comment", text=
+        "Optional: Initial joint positions as seed for solver (6 values)" "\n"
+        "If empty, uses current joint positions")
+      sequence<double> seed_joint_positions;
+
+      @verbatim (language="comment", text=
+        "Whether to consider orientation in the solution" "\n"
+        "If false, only position is matched")
+      boolean use_orientation;
+
+      @verbatim (language="comment", text=
+        "Maximum time allowed for solving in seconds")
+      double timeout;
+    };
+    struct SolveIK_Response {
+      @verbatim (language="comment", text=
+        "Whether a valid IK solution was found")
+      boolean success;
+
+      @verbatim (language="comment", text=
+        "Joint positions solution (6 values)" "\n"
+        "Order: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate")
+      sequence<double> joint_positions;
+
+      @verbatim (language="comment", text=
+        "Residual position error in meters")
+      double position_error;
+
+      @verbatim (language="comment", text=
+        "Residual orientation error in radians")
+      double orientation_error;
+
+      @verbatim (language="comment", text=
+        "Status message (e.g., \"Success\", \"No solution found\", \"Timeout\")")
+      string message;
+    };
+  };
+};

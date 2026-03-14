@@ -1,0 +1,23 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from tidybot_msgs/srv/GetJointState.srv
+// generated code does not contain a copyright notice
+
+#include "sensor_msgs/msg/JointState.idl"
+
+module tidybot_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Service to query current joint states")
+    struct GetJointState_Request {
+      @verbatim (language="comment", text=
+        "Optional: Specific joint names to query" "\n"
+        "If empty, returns all joints")
+      sequence<string> joint_names;
+    };
+    struct GetJointState_Response {
+      @verbatim (language="comment", text=
+        "Current joint state")
+      sensor_msgs::msg::JointState state;
+    };
+  };
+};

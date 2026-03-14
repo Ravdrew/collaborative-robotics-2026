@@ -1,0 +1,6 @@
+# Service to query current joint states
+
+# Optional: Specific joint names to query
+# If empty, returns all joints
+string[] joint_names
+

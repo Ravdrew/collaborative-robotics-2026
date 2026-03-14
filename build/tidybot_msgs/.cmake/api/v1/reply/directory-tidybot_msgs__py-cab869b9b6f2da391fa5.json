@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "tidybot_msgs__py",
+		"source" : "/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/tidybot_msgs__py"
+	}
+}

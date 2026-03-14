@@ -1,0 +1,9 @@
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:msg/ArmCommand.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:msg/ArmVelocityCommand.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:msg/CartesianVelocityCommand.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:msg/GripperCommand.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:msg/PanTilt.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:srv/SolveIK.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:srv/GetJointState.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:srv/PlanToTarget.idl
+/home/locobot/Desktop/team1_guinea_pigs/collaborative-robotics-2026/build/tidybot_msgs/rosidl_adapter/tidybot_msgs:srv/AudioRecord.idl

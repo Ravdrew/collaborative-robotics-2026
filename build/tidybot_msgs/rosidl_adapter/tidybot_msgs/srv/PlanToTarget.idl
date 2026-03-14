@@ -1,0 +1,73 @@
+// generated from rosidl_adapter/resource/srv.idl.em
+// with input from tidybot_msgs/srv/PlanToTarget.srv
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Pose.idl"
+
+module tidybot_msgs {
+  module srv {
+    @verbatim (language="comment", text=
+      "Plan and execute motion to target pose service" "\n"
+      "Validates trajectory for collisions and singularities before execution")
+    struct PlanToTarget_Request {
+      @verbatim (language="comment", text=
+        "Which arm to move: \"right\" or \"left\"")
+      string arm_name;
+
+      @verbatim (language="comment", text=
+        "Target end-effector pose in base_link frame")
+      geometry_msgs::msg::Pose target_pose;
+
+      @verbatim (language="comment", text=
+        "Whether to match orientation or position only")
+      @default (value=TRUE)
+      boolean use_orientation;
+
+      @verbatim (language="comment", text=
+        "Whether to execute the motion if planning succeeds")
+      @default (value=TRUE)
+      boolean execute;
+
+      @verbatim (language="comment", text=
+        "Motion duration in seconds (for execution)")
+      @default (value=2.0)
+      double duration;
+
+      @verbatim (language="comment", text=
+        "Maximum allowed condition number for Jacobian (singularity threshold)" "\n"
+        "Lower = more conservative. Default 100.0 is reasonable, but to prevent unintended failure, set 500.0 here as default")
+      @default (value=500.0)
+      double max_condition_number;
+    };
+    struct PlanToTarget_Response {
+      @verbatim (language="comment", text=
+        "Whether planning succeeded (collision-free, no singularity)")
+      boolean success;
+
+      @verbatim (language="comment", text=
+        "Joint positions solution (6 values if success)" "\n"
+        "Order: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate")
+      sequence<double> joint_positions;
+
+      @verbatim (language="comment", text=
+        "Whether execution was attempted (only if success=true and execute=true)")
+      boolean executed;
+
+      @verbatim (language="comment", text=
+        "Position error of IK solution (meters)")
+      double position_error;
+
+      @verbatim (language="comment", text=
+        "Orientation error of IK solution (radians)")
+      double orientation_error;
+
+      @verbatim (language="comment", text=
+        "Jacobian condition number at solution (lower = further from singularity)")
+      double condition_number;
+
+      @verbatim (language="comment", text=
+        "Detailed status message")
+      string message;
+    };
+  };
+};

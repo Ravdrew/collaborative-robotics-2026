@@ -22,6 +22,7 @@ from rclpy.node import Node
 
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PointStamped, Pose
+from std_msgs.msg import Bool
 
 from cv_bridge import CvBridge
 import cv2
@@ -52,7 +53,7 @@ class FruitTargetNode(Node):
         self.bridge = CvBridge()
         self.model = YOLO("yolov8n.pt")
 
-        self.target_pick_classes = {"banana", "apple"}
+        self.target_pick_classes = {"banana"}
         self.target_place_classes = {"bowl"}
 
         self.camera_info_sub = self.create_subscription(
@@ -68,9 +69,18 @@ class FruitTargetNode(Node):
 
         self.depth_window_radius = 2
 
-        self.get_logger().info("Fruit target node started (YOLO: apple/banana + bowl).")
+        # Detection gating: only publish when enabled (robot stationary)
+        self.detection_enabled = True
+        self.create_subscription(Bool, "/detection_enabled", self._on_detection_enabled, 10)
+
+        self.get_logger().info("Fruit target node started (YOLO: banana + bowl).")
+
+    def _on_detection_enabled(self, msg: Bool):
+        self.detection_enabled = msg.data
 
     def image_callback(self, rgb_msg, depth_msg):
+        if not self.detection_enabled:
+            return
         self.get_logger().debug("image_callback: received messages")
 
         try:
@@ -121,7 +131,7 @@ class FruitTargetNode(Node):
                     best_place = (conf, cls_name, (x1, y1, x2, y2))
 
         if best_pick is None and best_place is None:
-            self.get_logger().info("YOLO: detections found, but none were apple/banana/bowl")
+            self.get_logger().info("YOLO: detections found, but none were banana/bowl")
             return
 
         if best_pick is not None:
@@ -156,7 +166,10 @@ class FruitTargetNode(Node):
         px = int(np.clip(px, 0, w - 1))
         py = int(np.clip(py, 0, h - 1))
 
-        depth_m = self.get_depth_median_meters(depth, px, py)
+        if cls_name == "bowl":
+            depth_m = self.get_inner_bbox_depth(depth, x1, y1, x2, y2)
+        else:
+            depth_m = self.get_depth_median_meters(depth, px, py)
         if depth_m is None or depth_m <= 0.0:
             self.get_logger().info(f"{cls_name}: depth invalid at center ({px},{py}); skipping")
             return
@@ -174,7 +187,32 @@ class FruitTargetNode(Node):
         )
 
         self.publish_target(action, (X, Y, Z), orientation, header)
-        self.debug_viz(rgb, (x1, y1, x2, y2), cls_name, conf, (px, py), depth_m)
+
+    def get_inner_bbox_depth(self, depth_img, x1, y1, x2, y2):
+        """Average depth over the inner 50% of the bounding box."""
+        h, w = depth_img.shape[:2]
+        cx = (x1 + x2) * 0.5
+        cy = (y1 + y2) * 0.5
+        half_w = (x2 - x1) * 0.25  # 50% of bbox width / 2
+        half_h = (y2 - y1) * 0.25
+
+        ix0 = int(np.clip(cx - half_w, 0, w - 1))
+        ix1 = int(np.clip(cx + half_w, 0, w - 1))
+        iy0 = int(np.clip(cy - half_h, 0, h - 1))
+        iy1 = int(np.clip(cy + half_h, 0, h - 1))
+
+        window = depth_img[iy0:iy1 + 1, ix0:ix1 + 1].astype(np.float32).reshape(-1)
+        window = window[np.isfinite(window)]
+        window = window[window > 0]
+
+        if window.size == 0:
+            return None
+
+        avg = float(np.mean(window))
+        if avg > 10.0:
+            avg *= 0.001
+
+        return avg
 
     def get_depth_median_meters(self, depth_img, px, py):
         r = self.depth_window_radius
@@ -245,18 +283,6 @@ class FruitTargetNode(Node):
             self.pick_target_pub.publish(pose_msg)
         elif action == "place":
             self.place_target_pub.publish(pose_msg)
-
-    def debug_viz(self, rgb, bbox, cls_name, conf, center, depth_m):
-        x1, y1, x2, y2 = [int(v) for v in bbox]
-        cx, cy = center
-
-        vis = rgb.copy()
-        cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.circle(vis, (cx, cy), 4, (0, 0, 255), -1)
-        txt = f"{cls_name} {conf:.2f} z={depth_m:.2f}m"
-        cv2.putText(vis, txt, (x1, max(y1 - 10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-        cv2.imshow("fruit_yolo", vis)
-        cv2.waitKey(1)
 
 
 def main(args=None):

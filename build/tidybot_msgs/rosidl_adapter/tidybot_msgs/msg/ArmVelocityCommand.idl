@@ -1,0 +1,25 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from tidybot_msgs/msg/ArmVelocityCommand.msg
+// generated code does not contain a copyright notice
+
+#include "std_msgs/msg/Header.idl"
+
+module tidybot_msgs {
+  module msg {
+    typedef double double__6[6];
+    @verbatim (language="comment", text=
+      "Joint velocity command for a 6-DOF WX250s arm" "\n"
+      "Joint order: waist, shoulder, elbow, forearm_roll, wrist_angle, wrist_rotate")
+    struct ArmVelocityCommand {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "Target velocities in rad/s for each joint")
+      double__6 joint_velocities;
+
+      @verbatim (language="comment", text=
+        "Duration to apply velocity in seconds (0 = until next command)")
+      double duration;
+    };
+  };
+};

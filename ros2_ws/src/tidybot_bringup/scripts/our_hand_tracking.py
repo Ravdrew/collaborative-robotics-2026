@@ -4,14 +4,13 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import Image, CameraInfo
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import Pose
 
 from cv_bridge import CvBridge
 
 import cv2
 import numpy as np
 import mediapipe as mp
-import pyrealsense2 as rs
 
 from message_filters import Subscriber, ApproximateTimeSynchronizer
 
@@ -41,14 +40,26 @@ class HandPlaceTargetNode(Node):
 
         # Publisher
         self.target_pub = self.create_publisher(
-            PointStamped,
+            Pose,
             '/place_target_local',
+            10
+        )
+
+        # Camera intrinsics
+        self.fx = None
+        self.fy = None
+        self.cx = None
+        self.cy = None
+        self.create_subscription(
+            CameraInfo,
+            '/camera/color/camera_info',
+            self.camera_info_callback,
             10
         )
 
         # CV bridge
         self.bridge = CvBridge()
-        
+
         self.get_logger().info("Initializing MediaPipe Hands...")
 
         # MediaPipe Hands
@@ -67,16 +78,16 @@ class HandPlaceTargetNode(Node):
     def image_callback(self, rgb_msg, depth_msg):
 
         # Callback entry
-        self.get_logger().info("image_callback: received messages")
-        self.get_logger().debug("image_callback called")
+        self.get_logger().info("Hand tracker image_callback: received messages")
+        self.get_logger().debug("Hand reacker image_callback called")
 
         # Convert ROS → OpenCV
         try:
             rgb = self.bridge.imgmsg_to_cv2(rgb_msg, 'bgr8')
             depth = self.bridge.imgmsg_to_cv2(depth_msg, 'passthrough')
         except Exception as e:
-            self.get_logger().info(f"Failed to convert images: {e}")
-            self.get_logger().error(f"Failed to convert images: {e}")
+            self.get_logger().info(f"Hand tracker failed to convert images: {e}")
+            self.get_logger().error(f"Hand tracker failed to convert images: {e}")
             return
 
         rgb_rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
@@ -105,7 +116,7 @@ class HandPlaceTargetNode(Node):
             # Check bounds
             if px < 0 or px >= w or py < 0 or py >= h:
                 skipped_oob += 1
-                self.get_logger().info(f"Landmark out of bounds: px={px}, py={py}, w={w}, h={h}")
+                self.get_logger().info(f"Hand tracker landmark out of bounds: px={px}, py={py}, w={w}, h={h}")
                 continue
 
             # Depth in meters (RealSense usually mm → convert)
@@ -113,7 +124,7 @@ class HandPlaceTargetNode(Node):
             try:
                 depth_val = float(depth_raw) * 0.001
             except Exception as e:
-                self.get_logger().info(f"Depth access error at ({py},{px}): {e}")
+                self.get_logger().info(f"Hand tracker depth access error at ({py},{px}): {e}")
                 continue
 
             if depth_val == 0:
@@ -124,14 +135,14 @@ class HandPlaceTargetNode(Node):
             try:
                 X, Y, Z = self.deproject(px, py, depth_val, w, h)
             except Exception as e:
-                self.get_logger().info(f"Deproject failed for px={px},py={py},d={depth_val}: {e}")
+                self.get_logger().info(f"Hand tracker back-projection failed for px={px},py={py},d={depth_val}: {e}")
                 continue
 
             landmark_3d_points.append([X, Y, Z])
 
-        self.get_logger().info(f"Collected 3D landmarks: {len(landmark_3d_points)} (skipped_depth_zero={skipped_depth_zero}, skipped_oob={skipped_oob})")
+        self.get_logger().info(f"Hand tracker collected 3D landmarks: {len(landmark_3d_points)} (skipped_depth_zero={skipped_depth_zero}, skipped_oob={skipped_oob})")
         if len(landmark_3d_points) < 21:
-            self.get_logger().info("Not enough valid 3D landmarks to publish target")
+            self.get_logger().info("Hand tracker: Not enough valid 3D landmarks to publish target")
             return
 
         landmark_3d_points = np.array(landmark_3d_points)
@@ -143,38 +154,36 @@ class HandPlaceTargetNode(Node):
 
         palm_center = np.mean(palm_points, axis=0)
 
-        self.get_logger().info(f"Palm center (camera frame): {palm_center}")
+        self.get_logger().info(f"Hand tracker: Palm center (camera frame): {palm_center}")
         self.publish_target(palm_center, rgb_msg.header)
 
     # --------------------------------------------------
 
-    def deproject(self, px, py, depth, w, h):
-        """
-        Simple pinhole back-projection.
-        Replace intrinsics with CameraInfo in production.
-        """
+    def camera_info_callback(self, msg: CameraInfo):
+        self.fx = msg.k[0]
+        self.fy = msg.k[4]
+        self.cx = msg.k[2]
+        self.cy = msg.k[5]
+        self.get_logger().info(
+            f"Camera intrinsics received: fx={self.fx:.1f} fy={self.fy:.1f} "
+            f"cx={self.cx:.1f} cy={self.cy:.1f}",
+            once=True
+        )
 
-        # Deproject manually
-        fx = 600.0
-        fy = 600.0
-        cx = w / 2.0
-        cy = h / 2.0
+    def deproject(self, px, py, depth, w, h):
+        if self.fx is not None:
+            fx, fy, cx, cy = self.fx, self.fy, self.cx, self.cy
+        else:
+            self.get_logger().warn("Camera intrinsics not yet received, using fallback values")
+            fx, fy = 600.0, 600.0
+            cx, cy = w / 2.0, h / 2.0
 
         X = (px - cx) * depth / fx
         Y = (py - cy) * depth / fy
         Z = depth
 
-        # Debug small sanity check
         if not np.isfinite(X) or not np.isfinite(Y) or not np.isfinite(Z):
-            self.get_logger().info(f"Deproject produced non-finite: px={px},py={py},depth={depth},X={X},Y={Y},Z={Z}")
-
-        # Deproject with RS
-        # point_3d = rs.rs2_deproject_pixel_to_point(
-        #     intrinsics,
-        #     [px, py],
-        #     depth
-        # )
-        # X, Y, Z = point_3d
+            raise ValueError(f"Non-finite deproject: X={X}, Y={Y}, Z={Z}")
 
         return X, Y, Z
 
@@ -182,16 +191,14 @@ class HandPlaceTargetNode(Node):
 
     def publish_target(self, point, header):
 
-        msg = PointStamped()
+        msg = Pose()
 
-        msg.header = header
-        msg.header.frame_id = "camera_color_optical_frame"
+        msg.position.x = float(point[0])
+        msg.position.y = float(point[1])
+        msg.position.z = float(point[2])
+        msg.orientation.w = 1.0
 
-        msg.point.x = float(point[0])
-        msg.point.y = float(point[1])
-        msg.point.z = float(point[2])
-
-        self.get_logger().info(f"Publishing target: x={msg.point.x:.3f}, y={msg.point.y:.3f}, z={msg.point.z:.3f}")
+        self.get_logger().info(f"Hand tracker publishing target: x={msg.position.x:.3f}, y={msg.position.y:.3f}, z={msg.position.z:.3f}")
         self.target_pub.publish(msg)
 
 

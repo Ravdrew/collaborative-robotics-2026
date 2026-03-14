@@ -68,10 +68,11 @@ _FINGERS_DOWN_HORIZONTAL = (0.5, 0.5, 0.5, -0.5)  # (qw, qx, qy, qz)
 _FINGERS_DOWN_VERTICAL = (0, 0.707107, 0, 0.707107)   # (qw, qx, qy, qz)
 
 # Gripper positions (0.0 = open, 1.0 = closed — matches test_arms_sim.py)
-_GRIPPER_OPEN   = 0.1
+_GRIPPER_OPEN   = 0.0
 _GRIPPER_CLOSED = 0.9
 
 _CAMERA_PAN = 0.6
+_CAMERA_NEUTRAL = 0.3
 
 # Finger joint open position (metres) — from MuJoCo model range
 _FINGER_OPEN_POS = 0.037
@@ -106,9 +107,11 @@ class GraspNode(Node):
         self.declare_parameter('grasp_finger_threshold', 0.033)
         self.declare_parameter('eef_arrival_threshold', 0.05)
         self.declare_parameter('camera_pan_time', 1.5)
+        self.declare_parameter('eef_stall_timeout', 5.0)
+        self.declare_parameter('eef_stall_threshold', 0.005)
         # Neutral/retract pose in base_link (safe overhead position)
-        self.declare_parameter('neutral_x',  -0.15)
-        self.declare_parameter('neutral_y', -0.40)
+        self.declare_parameter('neutral_x',  0.40)
+        self.declare_parameter('neutral_y', 0.15)
         self.declare_parameter('neutral_z',  0.40)
         self.declare_parameter('neutral_qw', _FINGERS_DOWN_HORIZONTAL[0])
         self.declare_parameter('neutral_qx', _FINGERS_DOWN_HORIZONTAL[1])
@@ -120,6 +123,10 @@ class GraspNode(Node):
         self.grasp_finger_threshold = self.get_parameter('grasp_finger_threshold').get_parameter_value().double_value
         self.eef_arrival_threshold  = self.get_parameter('eef_arrival_threshold').get_parameter_value().double_value
         self.camera_pan_time        = self.get_parameter('camera_pan_time').get_parameter_value().double_value
+        self.eef_stall_timeout      = self.get_parameter('eef_stall_timeout').get_parameter_value().double_value
+        self.eef_stall_threshold    = self.get_parameter('eef_stall_threshold').get_parameter_value().double_value
+        self._last_eef_dist = None
+        self._last_eef_move_time = None
 
         neutral = Pose()
         neutral.position.x    = self.get_parameter('neutral_x').get_parameter_value().double_value
@@ -297,7 +304,7 @@ class GraspNode(Node):
         Euclidean distance to self._eef_pose in base_link.
         Returns None if the TF lookup fails.
         """
-        ee_frame = f'{self.arm_name}_ee_arm_link'
+        ee_frame = f'{self.arm_name}_pinch_site'
         try:
             tf = self._tf_buffer.lookup_transform(
                 'base_link', ee_frame, rclpy.time.Time())
@@ -319,7 +326,7 @@ class GraspNode(Node):
     def _startup_pan(self) -> None:
         """Pan camera to neutral once on startup, then cancel this timer."""
         self.get_logger().info('Startup: panning camera to neutral (pan=0.0, tilt=0.0).')
-        self._send_pan_tilt(0.0, 0.0)
+        self._send_pan_tilt(0.0, _CAMERA_NEUTRAL)
         self._startup_timer.cancel()
 
     # ------------------------------------------------------------------
@@ -406,13 +413,18 @@ class GraspNode(Node):
                     self.get_logger().info(
                         f'EEF arrived at target (dist={dist:.4f} m). '
                         f'Action: {self.action}.')
+                    self._last_eef_dist = None
+                    self._last_eef_move_time = None
                     next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
                     self._transition(next_state)
                     return
 
             if self._elapsed() > 20.0:
-                self.get_logger().error('Timed out waiting for EEF to arrive.')
-                self._transition(State.FAILED)
+                self.get_logger().warn('Timed out waiting for EEF — closing gripper and raising.')
+                self._last_eef_dist = None
+                self._last_eef_move_time = None
+                next_state = State.CLOSE_GRIPPER if self.action == 'pick' else State.OPEN_GRIPPER
+                self._transition(next_state)
 
         # ── CLOSE_GRIPPER (pick) ─────────────────────────────────────────
         elif self._state == State.CLOSE_GRIPPER:
@@ -500,7 +512,7 @@ class GraspNode(Node):
             elapsed = self._elapsed()
             if elapsed < 0.1:
                 self.get_logger().info('Panning camera back to neutral (tilt=0.0) ...')
-            self._send_pan_tilt(0.0, 0.0)
+            self._send_pan_tilt(0.0, _CAMERA_NEUTRAL)
             if elapsed > self.camera_pan_time:
                 self.get_logger().info('Camera back to neutral.')
                 self._transition(State.DONE)
@@ -540,6 +552,7 @@ def main(args=None):
     node = GraspNode()
 
     try:
+        node._send_pan_tilt(0.0, 0.3)
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
